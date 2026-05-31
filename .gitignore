@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Ignore downloaded dictionaries (heavy JSON or zip files)
+dictionary-service/dictionaries/*
+!dictionary-service/dictionaries/.gitkeep
+
+# Ignore downloaded AI models (large .gguf files)
+translator-service/models/*
+!translator-service/models/.gitkeep
