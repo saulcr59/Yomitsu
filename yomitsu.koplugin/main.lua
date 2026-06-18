@@ -9,13 +9,38 @@ local logger          = require("logger")
 local Yomitsu = WidgetContainer:extend{ name = "yomitsu" }
 
 local ORCHESTRATOR_URL = "http://192.168.50.87:8002/analyze"
+local TIMEOUT_SECS     = 30
 
 local original_onLookupWord = ReaderDictionary.onLookupWord
 local original_lookup       = ReaderDictionary.lookup
 
+-- Fix: 0xE3 (227) covers hiragana+katakana; 0xE4-0xE9 (228-233) covers kanji.
+-- Previous code missed hiragana/katakana entirely.
 local function hasJapanese(text)
     if not text then return false end
-    return text:match("[%z\1-\127]") == nil or text:match("[\228-\233]") ~= nil
+    return text:match("[\227-\233]") ~= nil
+end
+
+-- Try to recover a sentence/phrase of context from KOReader's highlight state.
+-- Without real context, Sudachi and the LLM both work blind (can't disambiguate
+-- homographs like 今日 → きょう vs こんにち).
+local function get_sentence_context(scope, word)
+    local hl = scope.ui and scope.ui.highlight
+    if hl then
+        -- When the user drags to select a range, selected_text holds the full selection.
+        if hl.selected_text and type(hl.selected_text) == "table" then
+            local t = hl.selected_text.text or ""
+            if #t > #word then return t end
+        end
+        -- Some KOReader builds store a sentence context in selected_word.
+        if hl.selected_word and type(hl.selected_word) == "table" then
+            local ctx = hl.selected_word.context or hl.selected_word.sentence or ""
+            if #ctx > #word then return ctx end
+        end
+    end
+    -- Fallback: send just the word. Sudachi will still normalise correctly,
+    -- but homograph disambiguation won't be possible without surrounding text.
+    return word
 end
 
 -- Construye el HTML simple para el análisis IA
@@ -59,18 +84,24 @@ local function yomitsuInterceptor(scope, text, ...)
     -- Mensaje de carga
     local info_box = InfoMessage:new{ text = "Yomitsu: Analizando..." }
     UIManager:show(info_box)
+    UIManager:forceRePaint()  -- render loading UI before the blocking HTTP call
 
     UIManager:scheduleIn(0.05, function()
         logger.info("[YOMITSU] Enviando petición al Orquestador...")
 
+        -- Fix: send the surrounding sentence as context so Sudachi/LLM can
+        -- disambiguate. target_word is ONLY the tapped word.
+        local context = get_sentence_context(scope, text)
+        logger.info("[YOMITSU] Contexto:", context)
+
         local payload = json.encode({
-            raw_text    = text,
+            raw_text    = context,
             target_word = text
         })
 
         local socket = require("socket.http")
         local ltn12  = require("ltn12")
-        socket.TIMEOUT = 30
+        socket.TIMEOUT = TIMEOUT_SECS
 
         local response_body = {}
         local _, code = socket.request{
@@ -140,6 +171,7 @@ local function yomitsuInterceptor(scope, text, ...)
             end
 
             local viewer = DictQuickLookup:new{
+                ui         = scope.ui,  -- required for navigation actions (◁◁ ▷▷)
                 lookupword = word,
                 is_html    = true,
                 results    = results,

@@ -29,8 +29,8 @@ Estructura del HTML original:
 
 from __future__ import annotations
 import re
-import html as html_lib
 from bs4 import BeautifulSoup, NavigableString, Tag
+from formatter_base import esc as _esc, wrap_body
 
 # ---------------------------------------------------------------------------
 # CSS — compatible CSS 2.1 / MuPDF
@@ -41,128 +41,19 @@ body {
     padding: 0.4em 0.6em;
     font-size: 1em;
     line-height: 1.6;
+    text-align: left;
 }
-
-/* Sub-entrada (I ほん【本】, II ほん-【本-】...) */
-.k-subentry {
-    margin-bottom: 0.8em;
-}
-.k-subentry + .k-subentry {
-    border-top: 2px solid #ccc;
-    padding-top: 0.6em;
-    margin-top: 0.6em;
-}
-
-/* Cabecera */
-.k-header {
-    margin-bottom: 0.3em;
-}
-.k-roman {
-    font-weight: bold;
-    font-size: 0.85em;
-    color: #888;
-    margin-right: 0.3em;
-}
-.k-reading {
-    color: #888;
-    font-size: 0.85em;
-    margin-right: 0.2em;
-}
-.k-headword {
-    font-weight: bold;
-    font-size: 1.1em;
-}
-
-/* Acepciones numeradas */
-.k-sense {
-    margin-top: 0.4em;
-    margin-bottom: 0.3em;
-}
-.k-num {
-    font-weight: bold;
-    color: #333;
-    margin-right: 0.3em;
-}
-
-/* Definición principal */
-.k-def {
-    margin: 0.1em 0 0.15em 0;
-}
-
-/* Etiquetas inline */
-.k-field {
-    display: inline-block;
-    font-size: 0.75em;
-    font-weight: bold;
-    background-color: #505050;
-    color: #fff;
-    padding: 0.1em 0.3em;
-    border-radius: 0.25em;
-    margin-right: 0.3em;
-    vertical-align: middle;
-}
-.k-ctx {
-    color: #666;
-    font-size: 0.9em;
-}
-.k-register {
-    color: #777;
-    font-size: 0.85em;
-    font-style: italic;
-}
-.k-note {
-    color: #666;
-    font-size: 0.85em;
-    margin: 0.2em 0 0.2em 0.5em;
-    padding-left: 0.5em;
-    border-left: 2px solid #ccc;
-}
-.k-xref {
-    color: #666;
-    font-size: 0.9em;
-    font-style: italic;
-}
-
-/* Ejemplos */
-.k-examples {
-    margin: 0.3em 0 0.1em 0;
-}
-.k-ex-main {
-    margin: 0.2em 0 0.1em 0.4em;
-    padding-left: 0.5em;
-    border-left: 3px solid #bbb;
-}
-.k-ex-sub {
-    margin: 0.15em 0 0.1em 0.8em;
-    padding-left: 0.4em;
-    border-left: 2px solid #ddd;
-    font-size: 0.95em;
-}
-.k-ex-ja { display: block; }
-.k-ex-en { display: block; color: #555; font-size: 0.9em; }
-
-/* Compuestos y expresiones derivadas */
-.k-compounds {
-    margin-top: 0.5em;
-    padding-top: 0.3em;
-    border-top: 1px dashed #ddd;
-}
-.k-compound {
-    margin: 0.25em 0;
-}
-.k-comp-head {
-    font-weight: bold;
-    margin-right: 0.3em;
-}
+p { margin: 0.15em 0; }
+hr { border: none; border-top: 2px solid #ccc; margin: 0.5em 0; }
+.k-ctx   { color: #666; font-size: 0.9em; }
+.k-field { font-weight: bold; color: #333; }
+.k-reg   { color: #777; font-style: italic; font-size: 0.9em; }
+.k-xref  { color: #666; font-style: italic; }
 """
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _esc(s: str) -> str:
-    return html_lib.escape(str(s), quote=False)
-
 
 def _clean(s: str) -> str:
     return re.sub(r'\s+', ' ', s).strip()
@@ -287,6 +178,9 @@ def _parse_sense_content(html_chunk: str) -> dict:
       - def_text: texto de la definición
       - examples: lista de {type: 'main'|'sub', ja: str, en: str}
       - compounds: lista de {head: str, text: str}
+
+    Los compuestos en negrita recogen TODO hasta el siguiente <br> para
+    capturar correctamente inline tags como <sub>2</sub> en cross-refs.
     """
     soup = BeautifulSoup(html_chunk, 'html.parser')
 
@@ -294,26 +188,33 @@ def _parse_sense_content(html_chunk: str) -> dict:
     examples = []
     compounds = []
     pending_compound_head = None
+    compound_text_parts: list[str] = []
 
     for node in soup.children:
+        # Modo recogida de texto de compuesto: acumular hasta <br>
+        if pending_compound_head is not None:
+            if isinstance(node, Tag) and node.name == 'br':
+                compounds.append({
+                    'head': pending_compound_head,
+                    'text': _clean(''.join(compound_text_parts))
+                })
+                pending_compound_head = None
+                compound_text_parts = []
+            elif isinstance(node, NavigableString):
+                compound_text_parts.append(str(node).replace('\r', '').replace('\n', ' '))
+            elif isinstance(node, Tag):
+                compound_text_parts.append(node.get_text())
+            continue
+
         if isinstance(node, NavigableString):
             t = str(node).replace('\r', '').replace('\n', ' ')
             if t.strip():
-                if pending_compound_head:
-                    # El texto que sigue a un <b>compuesto</b>
-                    compounds.append({
-                        'head': pending_compound_head,
-                        'text': _clean(t)
-                    })
-                    pending_compound_head = None
-                else:
-                    def_parts.append(t)
+                def_parts.append(t)
 
         elif isinstance(node, Tag):
             if node.name == 'font':
                 color = (node.get('color') or '').lower().replace(' ', '')
                 if color in ('#151b8d', '151b8d', '#000080', 'navy'):
-                    # Ejemplo o subejemplo
                     raw_text = node.get_text()
                     if raw_text.startswith('●'):
                         ex_text = raw_text[1:].strip()
@@ -326,7 +227,6 @@ def _parse_sense_content(html_chunk: str) -> dict:
                     else:
                         def_parts.append(raw_text)
                 elif color in ('firebrick', '#b22222'):
-                    # Sub-cabecera (no debería llegar aquí normalmente)
                     pass
                 else:
                     def_parts.append(node.get_text())
@@ -334,15 +234,14 @@ def _parse_sense_content(html_chunk: str) -> dict:
             elif node.name == 'b':
                 t = node.get_text().strip()
                 if t and not _is_arabic(t) and not _is_roman(t):
-                    # Es un compuesto en negrita
                     pending_compound_head = t
+                    compound_text_parts = []
                 elif t and (_is_arabic(t) or _is_roman(t)):
-                    # Número de acepción que no se filtró — ignorar
                     pass
                 else:
                     def_parts.append(node.get_text())
 
-            elif node.name == 'sub':
+            elif node.name in ('sub', 'sup'):
                 def_parts.append(node.get_text())
 
             elif node.name == 'br':
@@ -350,6 +249,13 @@ def _parse_sense_content(html_chunk: str) -> dict:
 
             else:
                 def_parts.append(node.get_text())
+
+    # Compuesto sin <br> de cierre al final de la entrada
+    if pending_compound_head is not None and compound_text_parts:
+        compounds.append({
+            'head': pending_compound_head,
+            'text': _clean(''.join(compound_text_parts))
+        })
 
     def_text = _clean(''.join(def_parts))
 
@@ -372,20 +278,19 @@ def _split_example(text: str) -> tuple[str, str]:
         split_pos = m.start() + 1
         return text[:split_pos].strip(), text[split_pos:].strip()
 
-    # Heurística: mayúscula ASCII tras 2+ espacios o tras punto latino
-    m = re.search(r'\.\s{2,}([A-Z])', text)
-    if m:
+    # Punto latino + espacio + mayuscula, solo si hay japones antes del punto
+    m = re.search(r'\.\s+([A-Z])', text)
+    if m and any('぀' <= c <= '鿿' or '一' <= c <= '鿿' for c in text[:m.start()]):
         split_pos = m.start() + 1
         return text[:split_pos].strip(), text[split_pos:].strip()
 
-    # Último recurso: primera mayúscula ASCII con espacio previo
-    m = re.search(r'\s([A-Z][a-z])', text)
+    # Buscar primera palabra ASCII tras caracter japones (mayuscula o minuscula)
+    m = re.search(r'([぀-鿿゠-ヿ一-鿿])\s+([A-Za-z])', text)
     if m:
-        ja_candidate = text[:m.start()].strip()
-        en_candidate = text[m.start():].strip()
-        # Solo separar si el japonés tiene al menos 4 chars y contiene japonés real
-        has_jp = any('\u3040' <= c <= '\u9fff' for c in ja_candidate)
-        if has_jp and len(ja_candidate) >= 4 and len(en_candidate) >= 4:
+        split_pos = m.start(2)
+        ja_candidate = text[:split_pos].strip()
+        en_candidate = text[split_pos:].strip()
+        if len(ja_candidate) >= 2 and len(en_candidate) >= 2:
             return ja_candidate, en_candidate
 
     return text, ""
@@ -399,84 +304,49 @@ def _render_def_text(text: str) -> str:
     """Aplica marcadores especiales del Kenkyusha al texto de definición."""
     if not text:
         return ""
-
     result = _esc(text)
-
-    # 〔contexto〕
-    result = re.sub(
-        r'〔([^〕]+)〕',
-        r'<span class="k-ctx">〔\1〕</span>',
-        result
-    )
-    # 【campo】
-    result = re.sub(
-        r'【([^】]+)】',
-        r'<span class="k-field">\1</span>',
-        result
-    )
-    # 《uso》
-    result = re.sub(
-        r'《([^》]+)》',
-        r'<span class="k-register">《\1》</span>',
-        result
-    )
-    # <▲> nota cultural (ya escapado como &lt;▲&gt;)
-    result = re.sub(
-        r'&lt;▲&gt;\s*',
-        r'<span class="k-note">▲ </span>',
-        result
-    )
-    # [⇒word]
-    result = re.sub(
-        r'\[⇒([^\]]+)\]',
-        r'<span class="k-xref">⇒\1</span>',
-        result
-    )
-    # ⇒word sin corchetes
-    result = re.sub(
-        r'⇒([\w･ぁ-ん゛゜ァ-ヶ一-龯・]+)',
-        r'<span class="k-xref">⇒\1</span>',
-        result
-    )
-    # ＝word (equivalencia)
-    result = re.sub(
-        r'＝([\w･ぁ-ん゛゜ァ-ヶ一-龯・]+)',
-        r'<span class="k-xref">＝\1</span>',
-        result
-    )
-
+    result = re.sub(r'〔([^〕]+)〕', r'<font color="#666">〔\1〕</font>', result)
+    result = re.sub(r'【([^】]+)】', r'<b>\1</b>', result)
+    result = re.sub(r'《([^》]+)》', r'<i>\1</i>', result)
+    result = re.sub(r'&lt;▲&gt;\s*', r'▲ ', result)
+    result = re.sub(r'\[⇒([^\]]+)\]', r'<font color="#666">⇒\1</font>', result)
+    result = re.sub(r'⇒([\w･ぁ-ん゛゜ァ-ヶ一-龯・]+)', r'<font color="#666">⇒\1</font>', result)
+    result = re.sub(r'＝([\w･ぁ-ん゛゜ァ-ヶ一-龯・]+)', r'<font color="#666">＝\1</font>', result)
     return result
 
 
 def _render_example(ex: dict) -> str:
-    css_class = "k-ex-main" if ex['type'] == 'main' else "k-ex-sub"
-    marker = "●" if ex['type'] == 'main' else "・"
-    html = f'<div class="{css_class}">'
-    if ex['ja']:
-        html += f'<span class="k-ex-ja">{marker} {_esc(ex["ja"])}</span>'
+    if ex['type'] == 'main':
+        style_ja = 'margin:0.4em 0 0 0.5em; padding-left:0.5em; border-left:3px solid #aaa'
+        style_en = 'margin:0 0 0.3em 0.5em; padding-left:0.5em; border-left:3px solid #aaa'
+        marker = '&#x25CF;'
+    else:
+        style_ja = 'margin:0.3em 0 0 1em; padding-left:0.4em; border-left:2px solid #ccc'
+        style_en = 'margin:0 0 0.25em 1em; padding-left:0.4em; border-left:2px solid #ccc'
+        marker = '&#xB7;'
+    html = f'<p style="{style_ja}">{marker} {_esc(ex["ja"])}</p>'
     if ex['en']:
-        html += f'<span class="k-ex-en">{_esc(ex["en"])}</span>'
-    html += '</div>'
+        html += f'\n<p style="{style_en}"><font color="#555">{_esc(ex["en"])}</font></p>'
     return html
 
 
 def _render_subentry(roman: str, chunk: str) -> str:
-    """Renderiza una sub-entrada completa."""
+    """Renderiza una sub-entrada completa usando <p> para bloques garantizados."""
     parts = []
 
-    # Cabecera
+    # Cabecera — todo inline en un <p>
     reading, headword = _parse_header(chunk)
-    header = '<div class="k-header">'
+    hdr = '<p>'
     if roman:
-        header += f'<span class="k-roman">{_esc(roman)}</span>'
+        hdr += f'<b>{_esc(roman)}</b> '
     if reading:
-        header += f'<span class="k-reading">{_esc(reading)}</span>'
+        hdr += f'<font color="#777">{_esc(reading)}</font>'
     if headword:
-        header += f'<span class="k-headword">{_esc(headword)}</span>'
-    header += '</div>'
-    parts.append(header)
+        hdr += f'&#x3010;<b>{_esc(headword)}</b>&#x3011;'
+    hdr += '</p>'
+    parts.append(hdr)
 
-    # Eliminar cabecera del chunk para procesar el resto
+    # Eliminar cabecera del chunk
     soup = BeautifulSoup(chunk, 'html.parser')
     header_tag = soup.find('font', color=lambda c: c and c.lower() in ('firebrick', '#b22222'))
     if header_tag:
@@ -486,14 +356,13 @@ def _render_subentry(roman: str, chunk: str) -> str:
     # ¿Redirect simple?
     clean = _clean(soup.get_text())
     if re.match(r'^[＝=]?⇒', clean):
-        parts.append(f'<div class="k-def"><span class="k-xref">{_esc(clean)}</span></div>')
+        parts.append(f'<p><font color="#666">{_esc(clean)}</font></p>')
         return '\n'.join(parts)
 
     # Dividir en acepciones
     senses = _split_senses(remaining)
     all_compounds = []
 
-    sense_parts = []
     for num, sense_chunk in senses:
         parsed = _parse_sense_content(sense_chunk)
         all_compounds.extend(parsed['compounds'])
@@ -501,35 +370,25 @@ def _render_subentry(roman: str, chunk: str) -> str:
         if not parsed['def_text'] and not parsed['examples']:
             continue
 
-        sense_html = '<div class="k-sense">'
-        if num:
-            sense_html += f'<span class="k-num">{_esc(num)}.</span>'
-
+        # Número + definición en el mismo <p> para que sean bloque conjunto
         if parsed['def_text']:
-            sense_html += f'<span class="k-def">{_render_def_text(parsed["def_text"])}</span>'
+            def_line = ''
+            if num:
+                def_line += f'<b>{_esc(num)}.</b> '
+            def_line += _render_def_text(parsed['def_text'])
+            parts.append(f'<p>{def_line}</p>')
 
-        if parsed['examples']:
-            sense_html += '<div class="k-examples">'
-            for ex in parsed['examples']:
-                sense_html += _render_example(ex)
-            sense_html += '</div>'
+        for ex in parsed['examples']:
+            parts.append(_render_example(ex))
 
-        sense_html += '</div>'
-        sense_parts.append(sense_html)
-
-    parts.extend(sense_parts)
-
-    # Compuestos y expresiones derivadas
+    # Compuestos
     if all_compounds:
-        comp_html = '<div class="k-compounds">'
+        parts.append('<p><font color="#aaa">&#x2500;&#x2500;&#x2500;</font></p>')
         for c in all_compounds:
-            comp_html += '<div class="k-compound">'
-            comp_html += f'<span class="k-comp-head">{_esc(c["head"])}</span>'
+            line = f'<b>{_esc(c["head"])}</b>'
             if c['text']:
-                comp_html += _render_def_text(c['text'])
-            comp_html += '</div>'
-        comp_html += '</div>'
-        parts.append(comp_html)
+                line += f' {_render_def_text(c["text"])}'
+            parts.append(f'<p>{line}</p>')
 
     return '\n'.join(parts)
 
@@ -554,21 +413,7 @@ def format_kenkyusha_to_html(definition: str) -> str:
     for roman, chunk in subentries:
         rendered = _render_subentry(roman, chunk)
         if rendered.strip():
-            body_parts.append(f'<div class="k-subentry">{rendered}</div>')
+            body_parts.append(rendered)
 
-    body = '\n'.join(body_parts) if body_parts else '<p>No definition found.</p>'
-
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"'
-        ' "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n'
-        '<html xmlns="http://www.w3.org/1999/xhtml">\n'
-        '<head>\n'
-        '  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />\n'
-        f'  <style type="text/css">{CSS}</style>\n'
-        '</head>\n'
-        '<body>\n'
-        f'{body}\n'
-        '</body>\n'
-        '</html>\n'
-    )
+    body = '\n<hr/>\n'.join(body_parts) if body_parts else '<p>No definition found.</p>'
+    return wrap_body(body, css=CSS)

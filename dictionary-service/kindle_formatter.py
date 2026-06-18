@@ -13,21 +13,8 @@ Prioridades de visualización:
 """
 
 from __future__ import annotations
-import html as html_lib
 from typing import Union
-
-# ---------------------------------------------------------------------------
-# Abreviaciones POS más legibles en pantalla pequeña
-# ---------------------------------------------------------------------------
-POS_SHORT = {
-    "noun": "n.", "verb": "v.", "adverb": "adv.", "adjective": "adj.",
-    "expression": "exp.", "pronoun": "pron.", "particle": "part.",
-    "suffix": "suf.", "prefix": "pref.", "interjection": "int.",
-    "conjunction": "conj.", "counter": "ctr.", "numeric": "num.",
-    "auxiliary": "aux.", "to-adverb": "adv-to.", "suru": "suru",
-    "na-adjective": "na-adj.", "i-adjective": "i-adj.",
-    "no-adjective": "no-adj.", "adjectival noun": "adj-n.",
-}
+from formatter_base import esc as _esc, wrap_body, CSS
 
 MISC_SKIP = {"kana"}   # misc tags que no aportan en pantalla pequeña
 
@@ -35,7 +22,7 @@ MISC_SKIP = {"kana"}   # misc tags que no aportan en pantalla pequeña
 # Extracción de texto plano de un nodo (para ruby, ejemplos, etc.)
 # ---------------------------------------------------------------------------
 def _text(node) -> str:
-    """Extrae texto plano recursivamente, descartando <rt> (furigana)."""
+    """Extrae texto plano recursivamente, descartando <rt> (furigana) y footnotes."""
     if node is None:
         return ""
     if isinstance(node, str):
@@ -45,13 +32,12 @@ def _text(node) -> str:
     if isinstance(node, dict):
         tag = node.get("tag", "")
         if tag == "rt":
-            return ""          # ignorar furigana en texto plano
+            return ""
+        dc = (node.get("data") or {}).get("content", "")
+        if dc == "attribution-footnote":
+            return ""          # ignorar [1], [2], etc. en las traducciones
         return _text(node.get("content", ""))
     return ""
-
-
-def _esc(s: str) -> str:
-    return html_lib.escape(str(s), quote=False)
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +71,30 @@ def _find_data_class(node, target_class: str) -> list:
     return results
 
 
+def _extract_xref(xref_node) -> tuple[str, str]:
+    """Extrae (término, glosario) de un nodo extra-box[content=xref]."""
+    term = ""
+    glossary = ""
+    content = xref_node.get("content", [])
+    if isinstance(content, dict):
+        content = [content]
+    for child in (content if isinstance(content, list) else []):
+        if not isinstance(child, dict):
+            continue
+        dc = (child.get("data") or {}).get("content", "")
+        if dc == "xref-content":
+            inner = child.get("content", [])
+            if isinstance(inner, dict):
+                inner = [inner]
+            for c in (inner if isinstance(inner, list) else []):
+                if isinstance(c, dict) and c.get("tag") == "a":
+                    term = _text(c.get("content", "")).strip()
+                    break
+        elif dc == "xref-glossary":
+            glossary = _text(child.get("content", "")).strip()
+    return term, glossary
+
+
 def extract_sense_groups(sc_content) -> list[dict]:
     """
     Devuelve lista de sense-groups, cada uno con:
@@ -93,6 +103,7 @@ def extract_sense_groups(sc_content) -> list[dict]:
       - misc_tags: list[str]
       - glosses: list[str]
       - examples: list[(ja_text, en_text)]
+      - xrefs: list[(term, glossary)]
     """
     groups = []
 
@@ -113,6 +124,7 @@ def extract_sense_groups(sc_content) -> list[dict]:
         misc_tags = []
         glosses = []
         examples = []
+        xrefs = []
 
         for child in (content if isinstance(content, list) else [content]):
             if not isinstance(child, dict):
@@ -121,10 +133,18 @@ def extract_sense_groups(sc_content) -> list[dict]:
             child_dc = child_data.get("content", "")
             child_class = child_data.get("class", "")
 
-            # Tags POS
-            if child_dc == "part-of-speech-info":
+            # Restricción de lectura: span con title "valid only for..." → 〔こんにち only〕
+            if child.get("tag") == "span" and not child_dc:
+                title = child.get("title", "")
+                if "valid only for" in title:
+                    restr = _text(child.get("content", "")).strip()
+                    if restr:
+                        misc_tags.append(restr)
+
+            # Tags POS — usar el label tal cual viene de Jitendex
+            elif child_dc == "part-of-speech-info":
                 raw = _text(child.get("content", "")).strip()
-                pos_tags.append(POS_SHORT.get(raw, raw))
+                pos_tags.append(raw)
 
             # Tags misc (kana, archaic, etc.)
             elif child_dc == "misc-info":
@@ -162,7 +182,6 @@ def extract_sense_groups(sc_content) -> list[dict]:
                                 glosses.append(t)
 
                     elif sc2 == "extra-info":
-                        # ejemplos de oraciones
                         ex_nodes = _find_data_class(sense_child, "extra-box")
                         for ex_node in ex_nodes:
                             ex_dc = (ex_node.get("data") or {}).get("content", "")
@@ -173,6 +192,10 @@ def extract_sense_groups(sc_content) -> list[dict]:
                                 en = _text(ex_b_nodes[0].get("content") if ex_b_nodes else "").strip()
                                 if ja:
                                     examples.append((ja, en))
+                            elif ex_dc == "xref":
+                                term, gloss = _extract_xref(ex_node)
+                                if term:
+                                    xrefs.append((term, gloss))
 
             # sense directo con ol (alternate format)
             elif child.get("tag") in ("ol", "ul") and not child_dc:
@@ -186,7 +209,6 @@ def extract_sense_groups(sc_content) -> list[dict]:
                             t = _text(gl).strip()
                             if t:
                                 glosses.append(t)
-                    # ejemplos dentro de sense alternativo
                     ex_nodes = _find_data_class(li, "extra-box")
                     for ex_node in ex_nodes:
                         ex_dc = (ex_node.get("data") or {}).get("content", "")
@@ -197,6 +219,10 @@ def extract_sense_groups(sc_content) -> list[dict]:
                             en = _text(ex_b_nodes[0].get("content") if ex_b_nodes else "").strip()
                             if ja:
                                 examples.append((ja, en))
+                        elif ex_dc == "xref":
+                            term, gloss = _extract_xref(ex_node)
+                            if term:
+                                xrefs.append((term, gloss))
 
         if glosses or pos_tags:
             groups.append({
@@ -205,6 +231,7 @@ def extract_sense_groups(sc_content) -> list[dict]:
                 "misc_tags": misc_tags,
                 "glosses": glosses,
                 "examples": examples,
+                "xrefs": xrefs,
             })
 
     return groups
@@ -246,38 +273,13 @@ def extract_redirect(sc_content) -> str | None:
 # Generación de HTML limpio
 # ---------------------------------------------------------------------------
 
-CSS = """\
-body { margin:0; padding:0.3em 0.5em; font-size:1em; line-height:1.4; }
-.word-header { font-size:1.1em; margin-bottom:0.4em; }
-.reading { color:#555; font-size:0.9em; margin-left:0.3em; }
-.sense-block { margin-bottom:0.6em; }
-.sense-num { font-weight:bold; margin-right:0.3em; }
-.tags { margin-bottom:0.2em; }
-.tag { display:inline-block; font-size:0.75em; font-weight:bold;
-       padding:0.1em 0.35em; border-radius:0.25em; margin-right:0.3em;
-       vertical-align:middle; }
-.tag-pos  { background-color:#444; color:#fff; }
-.tag-misc { background-color:#6a3; color:#fff; }
-.glosses { margin:0 0 0.2em 0.2em; }
-.gloss { margin-bottom:0.1em; }
-.example { margin:0.3em 0 0.2em 0.2em; padding:0.25em 0.4em;
-           border-left:2px solid #999; font-size:0.9em; }
-.ex-ja { margin-bottom:0.1em; }
-.ex-en { color:#555; }
-.forms-block { margin-top:0.4em; font-size:0.85em; color:#555; }
-.redirect { font-size:1.3em; margin:0.3em 0; }
-hr { border:none; border-top:1px solid #ccc; margin:0.4em 0; }
-"""
-
-
 def _render_entry(sc_content, reading: str) -> str:
     """Genera HTML para una entrada, dado su structured-content."""
 
-    # ¿Es un redirect?
     redir = extract_redirect(sc_content)
     if redir:
         redir_clean = redir.lstrip('⟶').lstrip('→').strip()
-        return f'<p class="redirect">&#x27F6; {_esc(redir_clean)}</p>'  
+        return f'<p style="font-size:1.1em; margin:0.3em 0">&#x27F6; {_esc(redir_clean)}</p>'
 
     groups = extract_sense_groups(sc_content)
     forms = extract_forms(sc_content)
@@ -289,55 +291,74 @@ def _render_entry(sc_content, reading: str) -> str:
     multi = len(groups) > 1
 
     for g in groups:
-        block = ['<div class="sense-block">']
-
-        # Número + tags en la misma línea
-        tags_html = ""
-        for t in g["pos_tags"]:
-            tags_html += f'<span class="tag tag-pos">{_esc(t)}</span>'
-        for t in g["misc_tags"]:
-            tags_html += f'<span class="tag tag-misc">{_esc(t)}</span>'
-
-        header = ""
+        # Cabecera POS/misc inline
+        sh_inner = ""
         if multi and g["number"]:
-            header = f'<span class="sense-num">{_esc(g["number"])}</span>'
-
-        if header or tags_html:
-            block.append(f'<div class="tags">{header}{tags_html}</div>')
+            sh_inner += f'<b>{_esc(g["number"])}</b> '
+        if g["pos_tags"]:
+            sh_inner += f'<i><font color="#555">{_esc(" · ".join(g["pos_tags"]))}</font></i>'
+        for mtag in g["misc_tags"]:
+            if mtag.startswith("〔"):
+                sh_inner += f' <font color="#666">{_esc(mtag)}</font>'
+            else:
+                sh_inner += f' <font color="#666">({_esc(mtag)})</font>'
+        if sh_inner:
+            parts.append(f'<p style="margin:0 0 0.2em 0">{sh_inner}</p>')
 
         # Definiciones
         if g["glosses"]:
-            block.append('<div class="glosses">')
-            for gl in g["glosses"]:
-                block.append(f'<div class="gloss">&#x2022; {_esc(gl)}</div>')
-            block.append('</div>')
+            parts.append(
+                f'<p style="margin:0.1em 0 0.4em 0.6em">'
+                f'{_esc("; ".join(g["glosses"]))}</p>'
+            )
 
-        # Ejemplos (máx 1 por sense-group para no saturar)
-        if g["examples"]:
-            ja, en = g["examples"][0]
-            block.append('<div class="example">')
-            block.append(f'<div class="ex-ja">{_esc(ja)}</div>')
+        # Ejemplos (máx 2) — dos <p> con border-left igual que Kenkyusha
+        for ja, en in g["examples"][:2]:
+            parts.append(
+                f'<p style="margin:0.5em 0 0 0.6em; padding-left:0.5em; border-left:2px solid #bbb">'
+                f'{_esc(ja)}</p>'
+            )
             if en:
-                block.append(f'<div class="ex-en">{_esc(en)}</div>')
-            block.append('</div>')
+                parts.append(
+                    f'<p style="margin:0 0 0.5em 0.6em; padding-left:0.5em; border-left:2px solid #bbb">'
+                    f'<font color="#555">{_esc(en)}</font></p>'
+                )
 
-        block.append('</div>')
-        parts.append("\n".join(block))
+        # Referencias cruzadas
+        for term, gloss in g.get("xrefs", []):
+            line = f'&#x2192; {_esc(term)}'
+            if gloss:
+                line += f': {_esc(gloss)}'
+            parts.append(f'<p style="color:#666; font-style:italic; margin:0.15em 0 0.1em 0.6em">{line}</p>')
 
-    # Formas alternativas (solo si hay y son pocas)
+        parts.append('<hr/>')
+
+    # Eliminar último <hr/>
+    if parts and parts[-1] == '<hr/>':
+        parts.pop()
+
+    # Formas alternativas
     if forms:
-        forms_str = " / ".join(_esc(f) for f in forms[:6])
-        parts.append(f'<div class="forms-block">Forms: {forms_str}</div>')
+        parts.append(
+            f'<p style="color:#666; margin-top:0.4em">'
+            f'{_esc(" / ".join(forms[:6]))}</p>'
+        )
 
-    return "\n<hr/>\n".join(parts)
+    return "\n".join(parts)
 
 
-def format_yomitan_to_html(results: list) -> str:
+def format_yomitan_to_html(results: list, word: str = "", reading: str = "") -> str:
     """
     Punto de entrada principal.
     results: lista de entradas del diccionario (cada una es entry completa).
+    word: forma kanji para el encabezado con furigana (opcional).
+    reading: lectura hiragana para el encabezado con furigana (opcional).
     """
-    reading = results[0][1] if results else ""
+    if not reading:
+        reading = results[0][1] if results else ""
+
+    # entry[2] = definition tags (space-separated string). "★" means high-priority/common word.
+    is_common = any("★" in (e[2] or "") for e in results if len(e) > 2)
 
     body_parts = []
     for entry in results:
@@ -354,19 +375,19 @@ def format_yomitan_to_html(results: list) -> str:
             if rendered:
                 body_parts.append(rendered)
 
-    body = "\n".join(body_parts) if body_parts else "<p>No definition found.</p>"
-
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"'
-        ' "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n'
-        '<html xmlns="http://www.w3.org/1999/xhtml">\n'
-        '<head>\n'
-        '  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />\n'
-        f'  <style type="text/css">{CSS}</style>\n'
-        '</head>\n'
-        '<body>\n'
-        f'{body}\n'
-        '</body>\n'
-        '</html>\n'
+    wh_style = (
+        'text-align:center; font-size:1.1em; '
+        'margin-bottom:0.5em; padding-bottom:0.3em; border-bottom:1px solid #ccc'
     )
+    common_badge = ' <font color="#c8a000">&#x2605;</font>' if is_common else ""
+    header = ""
+    if word and reading:
+        header = (
+            f'<p style="{wh_style}"><b>{_esc(word)}</b>'
+            f' <font color="gray">({_esc(reading)})</font>{common_badge}</p>\n'
+        )
+    elif word:
+        header = f'<p style="{wh_style}"><b>{_esc(word)}</b>{common_badge}</p>\n'
+
+    body = header + ("\n".join(body_parts) if body_parts else "<p>No definition found.</p>")
+    return wrap_body(body)

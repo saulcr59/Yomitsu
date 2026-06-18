@@ -63,7 +63,7 @@ async def analyze_word_with_context(request: LookUpAndTranslateRequest):
             logger.error(f"[LLM-ERROR] {str(e)}")
             return {}
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=25.0) as client:
         dict_data, trans_data = await asyncio.gather(
             fetch_dictionary(client),
             fetch_translator(client)
