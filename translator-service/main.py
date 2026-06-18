@@ -1,5 +1,6 @@
+import re
 import httpx
-import logging  # <-- 1. Importamos el módulo de logging
+import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -22,29 +23,48 @@ MODEL_NAME = "hf.co/unsloth/Hy-MT2-7B-GGUF:UD-Q4_K_XL"
 logger.info(f"Iniciando servicio. Endpoint de Ollama configurado en: {OLLAMA_API_URL}")
 logger.info(f"Modelo LLM seleccionado: {MODEL_NAME}")
 
+def _extract_sentence(context: str, target_word: str) -> str:
+    """Return the sentence in context that contains target_word."""
+    # Split on Japanese sentence-ending punctuation, keeping the delimiter
+    parts = re.split(r'(?<=[。！？])', context)
+    # Also honour newlines within each chunk
+    sentences = []
+    for part in parts:
+        sentences.extend(part.split('\n'))
+
+    for sentence in sentences:
+        s = sentence.strip()
+        if s and target_word in s:
+            return s
+
+    # Fallback: return the full context (it may be a single sentence already)
+    return context.strip()
+
+
 class TranslationRequest(BaseModel):
     context_phrase: str
     target_word: str
     part_of_speech: str
 
+@app.get("/health")
+async def health():
+    return {"status": "ok", "model": MODEL_NAME, "ollama_url": OLLAMA_API_URL}
+
+
 @app.post("/translate")
 async def translate_context(request: TranslationRequest):
     logger.info("--- Nueva petición de traducción recibida ---")
     logger.info(f"[ENDPOINT] Palabra objetivo: '{request.target_word}' ({request.part_of_speech})")
-    logger.info(f"[ENDPOINT] Frase de contexto: '{request.context_phrase}'")
+    logger.info(f"[ENDPOINT] Contexto completo: '{request.context_phrase}'")
 
-    # System instructions built directly into the prompt to prevent loop behaviors
+    source_sentence = _extract_sentence(request.context_phrase, request.target_word)
+    logger.info(f"[ENDPOINT] Frase extraída: '{source_sentence}'")
+
     prompt = f"""<system>
-    You are an expert Japanese-to-Spanish translator. Your task is to translate the sentence and explain the target word.
+    You are an expert Japanese-to-Spanish translator. Translate naturally and concisely.
     </system>
     <user>
-    Context sentence: {request.context_phrase}
-    Target word: {request.target_word} ({request.part_of_speech})
-
-    Provide:
-
-    1. A natural Spanish translation of the full context sentence.
-    2. A brief, 1-sentence explanation of the target word's nuance in this context.
+    Translate this Japanese sentence to Spanish: {source_sentence}
     </user>
     <assistant>"""
 
@@ -67,7 +87,7 @@ async def translate_context(request: TranslationRequest):
 
     logger.info(f"[OLLAMA] Enviando prompt al modelo '{MODEL_NAME}'... (El LLM puede tardar unos segundos en procesar)")
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=20.0) as client:
         try:
             response = await client.post(OLLAMA_API_URL, json=payload)
             response.raise_for_status()
@@ -80,6 +100,7 @@ async def translate_context(request: TranslationRequest):
 
             return {
                 "translation_raw": llm_output,
+                "source_sentence": source_sentence,
                 "model_used": MODEL_NAME,
                 "status": "success"
             }
