@@ -21,37 +21,13 @@ A self-hosted Japanese immersion ecosystem for KOReader. Long-press any word →
 
 ---
 
-## Installation (Ubuntu)
-
-The repo is always installed to `/opt/yomitsu`. Clone it there first, then run the script.
-
-### Option A — SSH (recommended)
-
-Requires an SSH key added to your GitHub account on the target machine.
+## Installation (Ubuntu — one command)
 
 ```bash
-git clone git@github.com:saulcr59/Yomitsu.git /opt/yomitsu
-sudo bash /opt/yomitsu/install.sh
+curl -fsSL https://raw.githubusercontent.com/saulcr59/Yomitsu/main/install.sh | sudo bash
 ```
 
-### Option B — GitHub Personal Access Token
-
-Generate a token at **GitHub → Settings → Developer settings → Personal access tokens** with `repo` scope, then:
-
-```bash
-git clone https://YOUR_TOKEN@github.com/saulcr59/Yomitsu.git /opt/yomitsu
-sudo bash /opt/yomitsu/install.sh
-```
-
-Or let the script clone for you:
-
-```bash
-sudo bash /opt/yomitsu/install.sh --token YOUR_TOKEN
-```
-
----
-
-The script will:
+The repo is cloned to `/opt/yomitsu`. The script will:
 
 1. Install Docker Engine and the Compose plugin
 2. Install Ollama and download the `Hy-MT2-7B` translation model
