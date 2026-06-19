@@ -23,6 +23,8 @@ A self-hosted Japanese immersion ecosystem for KOReader. Long-press any word →
 
 ## Installation (Ubuntu)
 
+The repo is always installed to `/opt/yomitsu`. Clone it there first, then run the script.
+
 ### Option A — SSH (recommended)
 
 Requires an SSH key added to your GitHub account on the target machine.
@@ -37,14 +39,14 @@ sudo bash /opt/yomitsu/install.sh
 Generate a token at **GitHub → Settings → Developer settings → Personal access tokens** with `repo` scope, then:
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/saulcr59/Yomitsu/main/install.sh)" -- --token YOUR_TOKEN
-```
-
-Or clone manually first:
-
-```bash
 git clone https://YOUR_TOKEN@github.com/saulcr59/Yomitsu.git /opt/yomitsu
 sudo bash /opt/yomitsu/install.sh
+```
+
+Or let the script clone for you:
+
+```bash
+sudo bash /opt/yomitsu/install.sh --token YOUR_TOKEN
 ```
 
 ---

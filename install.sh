@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Yomitsu — instalador para Ubuntu
 #
-# Uso desde el repo ya clonado (recomendado para repos privados):
+# Opcion A — SSH:
 #   git clone git@github.com:saulcr59/Yomitsu.git /opt/yomitsu
 #   sudo bash /opt/yomitsu/install.sh
 #
-# Uso con token de GitHub (repo privado, sin SSH):
-#   sudo bash install.sh --token <GITHUB_PAT>
+# Opcion B — Token de GitHub (repo privado, sin SSH):
+#   sudo bash /opt/yomitsu/install.sh --token <GITHUB_PAT>
+#   (o: git clone https://TOKEN@github.com/saulcr59/Yomitsu.git /opt/yomitsu)
 set -euo pipefail
 
 REPO_URL="https://github.com/saulcr59/Yomitsu.git"
@@ -88,13 +89,7 @@ info "Modelo listo."
 # Repositorio
 # ---------------------------------------------------------------------------
 step "Repositorio Yomitsu"
-
-# Si el script se ejecuta desde dentro del repo clonado, usarlo directamente.
-SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
-if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
-    info "Ejecutando desde el repositorio en $SCRIPT_DIR"
-    INSTALL_DIR="$SCRIPT_DIR"
-elif [[ -d "$INSTALL_DIR/.git" ]]; then
+if [[ -d "$INSTALL_DIR/.git" ]]; then
     info "Ya clonado en $INSTALL_DIR — actualizando..."
     git -C "$INSTALL_DIR" pull
 else
