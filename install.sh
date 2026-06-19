@@ -87,7 +87,7 @@ if [[ -f "$INSTALL_DIR/.env" ]]; then
     info ".env ya existe, no se modifica."
 else
     echo
-    read -rp "  OPENAI_API_KEY (para el analisis gramatical): " api_key
+    read -rp "  OPENAI_API_KEY (para el analisis gramatical): " api_key </dev/tty
     [[ -n "$api_key" ]] || die "La API key no puede estar vacia."
     echo "OPENAI_API_KEY=$api_key" > "$INSTALL_DIR/.env"
     info ".env creado."
