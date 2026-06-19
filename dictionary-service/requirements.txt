@@ -1,6 +1,6 @@
 annotated-doc==0.0.4
 beautifulsoup4>=4.12
-readmdict>=0.4
+readmdict==0.1.1
 annotated-types==0.7.0
 anyio==4.13.0
 click==8.4.1
