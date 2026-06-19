@@ -62,6 +62,15 @@ if ! command -v ollama &>/dev/null; then
     info "Instalando Ollama..."
     curl -fsSL https://ollama.ai/install.sh | sh
 fi
+
+# Ollama por defecto escucha solo en 127.0.0.1; los contenedores Docker
+# llegan via host.docker.internal y necesitan acceso desde fuera del loopback.
+mkdir -p /etc/systemd/system/ollama.service.d
+cat > /etc/systemd/system/ollama.service.d/override.conf << 'EOF'
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+EOF
+systemctl daemon-reload
 systemctl enable --now ollama
 info "Descargando modelo $OLLAMA_MODEL (puede tardar varios minutos)..."
 ollama pull "$OLLAMA_MODEL"
