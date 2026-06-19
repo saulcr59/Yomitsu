@@ -3,6 +3,7 @@ import os
 import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 
@@ -17,50 +18,94 @@ logger = logging.getLogger("YOMITSU-GRAMMAR")
 
 app = FastAPI(title="Yomitsu Grammar Analysis Service")
 
-MODEL = "gpt-4o-mini"
+MODEL = "gpt-4.1-mini"
 client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 SYSTEM_PROMPT = """\
-Eres un lingüista japonés especializado que explica en español con el rigor de un buen \
-diccionario académico. Estructura SIEMPRE tu respuesta con estas secciones exactas, \
-separadas por línea en blanco:
+You are an expert Japanese linguist teaching Japanese to Spanish speakers. \
+Your analysis is precise and didactic: explain not only what each piece means, \
+but how and when to use it, what distinguishes it from alternatives, \
+and what mistakes learners make.
+
+Always respond in Spanish using exactly this structure, in this order:
 
 DESGLOSE:
-Enumera cada elemento gramatical relevante de la frase en orden: palabras, partículas y \
-formas verbales/adjetivales. OMITE signos de puntuación (comas, puntos, 「」, etc.). \
-Usa el formato: "- ELEMENTO (lectura, romaji) — significado y función". \
-Para formas verbales y adjetivales conjugadas (て形, た形, ている, てしまう, ば条件, \
-連用形, 可能形, 受身形, 使役形, etc.) explica siempre: (1) desde qué forma de diccionario \
-se deriva y cómo se forma la terminación, (2) qué función gramatical cumple en esta frase. \
-Para cada elemento relevante añade matices: diferencias con expresiones similares \
-(ej: は vs が, さっき vs 先ほど, 〜てしまう vs 〜てしまった), \
-registro (formal/coloquial/escrito), connotaciones, restricciones de uso. \
-Marca la palabra objetivo con ★ al inicio de su línea.
+- ELEMENTO (lectura, romaji) [Nx] — explicación
+★ ELEMENTO_OBJETIVO (lectura, romaji) [Nx] — explicación
 
 ESTRUCTURA:
-Describe la arquitectura completa: qué modifica a qué, tipo de cláusulas, \
-orden de constituyentes, y si hay algún patrón gramatical notable \
-(potencial, causativa, pasiva, condicional, etc.) explica su construcción y uso.
+• [punto]
+• [punto]
 
-Sin introducción. Directo al análisis. Tan extenso como sea necesario para ser preciso.\
+ROMAJI:
+[romanización Hepburn de la frase]
+
+───
+
+Content instructions for each section:
+
+DESGLOSE:
+List the grammatical elements of the sentence in order of appearance. \
+Never include punctuation (commas, periods, 「」, ※, …): these are not grammatical elements. \
+Treat compound structures as a single entry: \
+〜ていた, 〜ではない, 〜のだ, 〜ようとする, 〜てしまう, 〜てみる, \
+〜ておく, 〜ことができる, 〜なければならない, 〜てもいい, and similar. \
+Exactly one entry carries ★ at the start: the target word's entry; \
+if it is part of a compound structure, ★ goes on that complete structure.
+The [Nx] field indicates the JLPT level of the vocabulary or grammatical pattern (N5/N4/N3/N2/N1). \
+If the element has no JLPT classification, omit the [Nx] field entirely.
+Each explanation must include:
+  1. Precise meaning in this context.
+  2. For conjugated forms: dictionary form → how the ending is constructed.
+  3. Grammatical function in this specific sentence.
+  4. Key difference from a similar expression when relevant \
+     (e.g. は vs が, 〜てしまった vs 〜てしまう, さっき vs 先ほど).
+  5. Register — only if it is NOT neutral: write "Registro: formal", "Registro: coloquial", \
+     "Registro: escrito", or "Registro: literario" as appropriate. \
+     If the word or pattern is plain neutral everyday Japanese, omit this field entirely.
+
+ESTRUCTURA:
+Write separate bullet points (•), never continuous prose. Cover:
+  • General sentence pattern and constituent order.
+  • Modification relationships between the main elements.
+  • Any notable grammatical pattern (causative, passive, conditional, potential, \
+    nominalization, etc.) with its construction and what it is used for.
+
+ROMAJI:
+A single line. Hepburn romanization of the analyzed sentence. \
+No translation, no explanations, no extra parentheses.\
 """
 
 
-def _extract_sentence(context: str, target_word: str) -> str:
+def _extract_sentence(context: str, target_word: str, original_word: str = "") -> str:
     parts = re.split(r'(?<=[。！？])', context)
     sentences = []
     for part in parts:
         sentences.extend(part.split('\n'))
+    candidates = [w for w in (target_word, original_word) if w]
     for sentence in sentences:
         s = sentence.strip()
-        if s and target_word in s:
+        if s and any(w in s for w in candidates):
             return s
     return context.strip()
+
+
+def _build_messages(sentence: str, target_word: str, part_of_speech: str) -> list:
+    user_prompt = (
+        f"Sentence: 「{sentence}」\n"
+        f"Target word: 「{target_word}」({part_of_speech})\n\n"
+        "Analyze this sentence following the system schema."
+    )
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": user_prompt},
+    ]
 
 
 class GrammarRequest(BaseModel):
     context_phrase: str
     target_word: str
+    original_word: str = ""
     part_of_speech: str
 
 
@@ -71,32 +116,58 @@ async def health():
 
 @app.post("/analyze-grammar")
 async def analyze_grammar(request: GrammarRequest):
-    sentence = _extract_sentence(request.context_phrase, request.target_word)
+    sentence = _extract_sentence(request.context_phrase, request.target_word, request.original_word)
     logger.info(f"[GRAMMAR] '{request.target_word}' en '{sentence}'")
-
-    user_prompt = (
-        f"Frase: 「{sentence}」\n"
-        f"Palabra objetivo: 「{request.target_word}」({request.part_of_speech})\n\n"
-        "Analiza esta frase siguiendo el esquema del sistema."
-    )
 
     try:
         response = await client.chat.completions.create(
             model=MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": user_prompt},
-            ],
-            max_tokens=2500,
+            messages=_build_messages(sentence, request.target_word, request.part_of_speech),
+            max_tokens=1000,
             temperature=0.3,
         )
-        analysis = response.choices[0].message.content.strip()
-        logger.info(f"[GRAMMAR] OK — {len(analysis)} chars")
+        raw = (response.choices[0].message.content or "").strip()
+        logger.info(f"[GRAMMAR] OK — {len(raw)} chars")
+
+        romaji = ""
+        romaji_match = re.search(r'\nROMAJI:\s*\n(.+?)(?:\n\n|\Z)', raw, re.DOTALL)
+        if romaji_match:
+            romaji = romaji_match.group(1).strip()
+            analysis = raw[:romaji_match.start()].strip()
+        else:
+            analysis = raw
+
         return {
             "grammar_analysis": analysis,
+            "romaji_sentence":  romaji,
             "model": MODEL,
             "status": "success",
         }
     except Exception as e:
         logger.error(f"[GRAMMAR] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/stream-grammar")
+async def stream_grammar(request: GrammarRequest):
+    sentence = _extract_sentence(request.context_phrase, request.target_word, request.original_word)
+    logger.info(f"[GRAMMAR-STREAM] '{request.target_word}' en '{sentence}'")
+
+    async def generate():
+        try:
+            response = await client.chat.completions.create(
+                model=MODEL,
+                messages=_build_messages(sentence, request.target_word, request.part_of_speech),
+                max_tokens=1000,
+                temperature=0.3,
+                stream=True,
+            )
+            async for chunk in response:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+        except Exception as e:
+            logger.error(f"[GRAMMAR-STREAM] Error: {e}")
+            yield "\n[Error al generar análisis]"
+
+    return StreamingResponse(generate(), media_type="text/plain")

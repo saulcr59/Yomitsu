@@ -35,6 +35,7 @@ GENIUS: dict[str, str] = {}
 GRAMMAR: dict[str, list[str]] = {}
 FREQ_JPDB: dict[str, int] = {}
 FREQ_BCCWJ: dict[str, int] = {}
+KANJI_INDEX: dict[str, list[dict]] = {}  # single-kanji char → [{reading, glosses}]
 
 
 _POS_MAP = {
@@ -196,6 +197,39 @@ def _sentence_to_romaji(sentence: str) -> str:
     return " ".join(p for p in parts if p)
 
 
+def _extract_glosses(node) -> list[str]:
+    """Extract English gloss strings from a Yomitan structured-content node."""
+    glosses: list[str] = []
+
+    def _text(n) -> str:
+        if isinstance(n, str): return n
+        if isinstance(n, list): return " ".join(_text(i) for i in n)
+        if isinstance(n, dict): return _text(n.get("content", ""))
+        return ""
+
+    def walk(n):
+        if isinstance(n, str): return
+        if isinstance(n, list):
+            for item in n: walk(item)
+            return
+        if not isinstance(n, dict): return
+        data = n.get("data", {})
+        if isinstance(data, dict) and data.get("content") == "glossary":
+            items = n.get("content", [])
+            if not isinstance(items, list): items = [items]
+            for li in items:
+                if isinstance(li, dict) and li.get("tag") == "li":
+                    text = _text(li.get("content", "")).strip()
+                    if text and not any("぀" <= c <= "鿿" for c in text):
+                        glosses.append(text)
+            return
+        walk(n.get("content", []))
+
+    for item in (node if isinstance(node, list) else [node]):
+        walk(item)
+    return glosses
+
+
 def load_jitendex():
     logger.info("Cargando Jitendex...")
     files = glob.glob("./dictionaries/jitendex-yomitan/term_bank_*.json")
@@ -204,7 +238,19 @@ def load_jitendex():
             for entry in json.load(f):
                 word = entry[0]
                 JITENDEX.setdefault(word, []).append(entry)
-    logger.info(f"Jitendex cargado: {len(JITENDEX)} entradas únicas.")
+                # Index single kanji for breakdown feature
+                if (len(word) == 1
+                        and ("一" <= word <= "鿿" or "㐀" <= word <= "䶿")):
+                    reading = entry[1]
+                    glosses = _extract_glosses(entry[5]) if len(entry) > 5 else []
+                    if reading and glosses:
+                        KANJI_INDEX.setdefault(word, []).append(
+                            {"reading": reading, "glosses": glosses}
+                        )
+    logger.info(
+        f"Jitendex cargado: {len(JITENDEX)} entradas únicas. "
+        f"Kanji indexados: {len(KANJI_INDEX)}."
+    )
 
 
 def load_kenkyusha():
@@ -328,9 +374,17 @@ def load_grammar():
 # ---------------------------------------------------------------------------
 # Lifespan
 # ---------------------------------------------------------------------------
+tokenizer_obj = None
+mode = tokenizer.Tokenizer.SplitMode.C
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global tokenizer_obj
     logger.info("Iniciando aplicación...")
+    logger.info("Cargando Sudachi...")
+    tokenizer_obj = dictionary.Dictionary().create()
+    logger.info("Sudachi listo (Modo C).")
     load_jitendex()
     load_kenkyusha()
     load_wisdom()
@@ -346,11 +400,6 @@ async def lifespan(app: FastAPI):
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(title="Yomitsu Dictionary Service", lifespan=lifespan)
-
-logger.info("Cargando Sudachi...")
-tokenizer_obj = dictionary.Dictionary().create()
-mode = tokenizer.Tokenizer.SplitMode.C
-logger.info("Sudachi listo (Modo C).")
 
 
 # ---------------------------------------------------------------------------
@@ -519,6 +568,37 @@ async def lookup_grammar(word: str, original: str = "") -> dict:
     return {"html_content": "", "found": False}
 
 
+def get_kanji_breakdown(word: str) -> list[dict]:
+    """Return per-kanji reading+meaning data for each CJK character in word."""
+    result: list[dict] = []
+    seen: set[str] = set()
+    for char in word:
+        if char in seen:
+            continue
+        seen.add(char)
+        if not ("一" <= char <= "鿿" or "㐀" <= char <= "䶿"):
+            continue
+        entries = KANJI_INDEX.get(char)
+        if not entries:
+            continue
+        reading_map: dict[str, list[str]] = {}
+        for e in entries:
+            r = e["reading"]
+            if r not in reading_map:
+                reading_map[r] = []
+            for g in e["glosses"]:
+                if g not in reading_map[r]:
+                    reading_map[r].append(g)
+        result.append({
+            "char": char,
+            "readings": [
+                {"reading": r, "glosses": g[:3]}
+                for r, g in reading_map.items()
+            ],
+        })
+    return result
+
+
 def lookup_freq(word: str, original: str = "") -> dict:
     result: dict[str, int] = {}
     for candidate in list(dict.fromkeys(filter(None, [word, original]))):
@@ -603,13 +683,15 @@ async def extract_word(request: TokenizeRequest):
     any_found = any(
         r["found"] for r in [jitendex_result, kenkyusha_result, wisdom_result, genius_result, grammar_result]
     )
-    freq_result = lookup_freq(target_word, original_word)
+    freq_result   = lookup_freq(target_word, original_word)
+    kanji_result  = get_kanji_breakdown(target_word)
     response_payload = {
         "word_data": sudachi_result,
         "dictionary_data": {
-            "reading":   reading_display,
-            "found":     any_found,
-            "frequency": freq_result,
+            "reading":         reading_display,
+            "found":           any_found,
+            "frequency":       freq_result,
+            "kanji_breakdown": kanji_result,
             "jitendex":  {"html_content": jitendex_result["html_content"],  "found": jitendex_result["found"]},
             "kenkyusha": {"html_content": kenkyusha_result["html_content"], "found": kenkyusha_result["found"]},
             "wisdom":    {"html_content": wisdom_result["html_content"],    "found": wisdom_result["found"]},

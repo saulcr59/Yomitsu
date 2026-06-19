@@ -1,5 +1,7 @@
-local WidgetContainer  = require("ui/widget/container/inputcontainer")
+local WidgetContainer  = require("ui/widget/container/widgetcontainer")
+local ButtonDialog     = require("ui/widget/buttondialog")
 local InfoMessage      = require("ui/widget/infomessage")
+local InputDialog      = require("ui/widget/inputdialog")
 local DictQuickLookup  = require("ui/widget/dictquicklookup")
 local UIManager        = require("ui/uimanager")
 local ReaderDictionary = require("apps/reader/modules/readerdictionary")
@@ -9,7 +11,7 @@ local logger           = require("logger")
 local DataStorage      = require("datastorage")
 local Screen = Device.screen
 
-local Yomitsu = WidgetContainer:extend{ name = "yomitsu" }
+local Yomitsu = WidgetContainer:extend{ name = "yomitsu", is_doc_only = true }
 
 -- ---------------------------------------------------------------------------
 -- Historial de búsquedas (últimas 20, guardadas en JSON)
@@ -28,13 +30,19 @@ end
 
 local function save_to_history(word, reading)
     local hist = load_history()
+    local prev_count = 0
     for i = #hist, 1, -1 do
-        if hist[i].word == word then table.remove(hist, i) end
+        if hist[i].word == word then
+            prev_count = hist[i].count or 1
+            table.remove(hist, i)
+        end
     end
+    local count = prev_count + 1
     table.insert(hist, 1, {
         word    = word,
         reading = reading or "",
         time    = os.date("%Y-%m-%d %H:%M"),
+        count   = count,
     })
     while #hist > HISTORY_MAX do table.remove(hist) end
     local f = io.open(HISTORY_PATH, "w")
@@ -42,6 +50,34 @@ local function save_to_history(word, reading)
         f:write(json.encode(hist))
         f:close()
     end
+    return count
+end
+
+-- LRU cache for dictionary phase-1 results (session-scoped, not persisted)
+local _cache      = {}
+local _cache_keys = {}
+local CACHE_MAX   = 50
+
+local function _cache_get(key)
+    return _cache[key]
+end
+
+local function _cache_set(key, value)
+    if _cache[key] then
+        for i, k in ipairs(_cache_keys) do
+            if k == key then table.remove(_cache_keys, i); break end
+        end
+    elseif #_cache_keys >= CACHE_MAX then
+        local oldest = table.remove(_cache_keys, 1)
+        _cache[oldest] = nil
+    end
+    _cache[key] = value
+    _cache_keys[#_cache_keys + 1] = key
+end
+
+local function _count_badge(count)
+    if not count or count <= 1 then return "" end
+    return '  <font color="#aaa"><small>×' .. tostring(count) .. '</small></font>'
 end
 
 local _XHTML_HEAD = '<?xml version="1.0" encoding="UTF-8"?>'
@@ -56,6 +92,39 @@ local _XHTML_TAIL = '</body></html>'
 
 local function _html_esc(s)
     return s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+end
+
+local function _build_kanji_html(kanji_list)
+    if not kanji_list or #kanji_list == 0 then return "" end
+    local lines = {}
+    for _, k in ipairs(kanji_list) do
+        local readings = {}
+        local meanings = {}
+        local seen_m = {}
+        for _, r in ipairs(k.readings or {}) do
+            if r.reading and r.reading ~= "" then
+                readings[#readings+1] = r.reading
+            end
+            for _, g in ipairs(r.glosses or {}) do
+                if not seen_m[g] and #meanings < 4 then
+                    seen_m[g] = true
+                    meanings[#meanings+1] = g
+                end
+            end
+        end
+        local reading_str = table.concat(readings, "・")
+        local meaning_str = table.concat(meanings, ", ")
+        lines[#lines+1] = string.format(
+            '<p style="margin:0.1em 0 0.1em 0.2em">'
+            .. '<b>%s</b>  <font color="#555">%s</font>'
+            .. '  <font color="#888"><small>%s</small></font></p>',
+            _html_esc(k.char or ""),
+            _html_esc(reading_str),
+            _html_esc(meaning_str)
+        )
+    end
+    if #lines == 0 then return "" end
+    return '<hr/>\n' .. table.concat(lines, "\n") .. "\n"
 end
 
 local function _grammar_lines(text)
@@ -108,28 +177,63 @@ local function buildHistoryHtml(current_word)
             (' <font color="gray">(' .. entry.reading .. ')</font>') or ""
         local date_str = entry.time and
             (' <font color="#bbb"><small>' .. entry.time .. '</small></font>') or ""
+        local count_str = (entry.count and entry.count > 1) and
+            (' <font color="#aaa"><small>×' .. tostring(entry.count) .. '</small></font>') or ""
         if entry.word == current_word then
             lines[#lines+1] = '<p style="margin:0.15em 0; border-left:3px solid #000; padding-left:0.4em"><b>'
-                .. entry.word .. '</b>' .. reading .. date_str .. '</p>'
+                .. entry.word .. '</b>' .. reading .. count_str .. date_str .. '</p>'
         else
             lines[#lines+1] = '<p style="margin:0.15em 0"><b>'
-                .. entry.word .. '</b>' .. reading .. date_str .. '</p>'
+                .. entry.word .. '</b>' .. reading .. count_str .. date_str .. '</p>'
         end
     end
     return _XHTML_HEAD .. table.concat(lines, "\n") .. _XHTML_TAIL
 end
 
-local ORCHESTRATOR_URL = "http://192.168.0.120:8002/analyze"
-local TIMEOUT_SECS     = 20
+-- ---------------------------------------------------------------------------
+-- Dictionary definitions and feature settings
+-- ---------------------------------------------------------------------------
+local DICTS = {
+    { key = "jitendex",  label = "Jitendex" },
+    { key = "kenkyusha", label = "研究社 (Kenkyusha)" },
+    { key = "wisdom",    label = "ウィズダム (Wisdom)" },
+    { key = "genius",    label = "ジーニアス (Genius)" },
+    { key = "dojg",      label = "文法 (DOJG Grammar)" },
+}
+local DICT_DEFAULT_ORDER = { "jitendex", "kenkyusha", "wisdom", "genius", "dojg" }
+local DICT_VIEWER_NAMES = {
+    jitendex  = "Jitendex",
+    kenkyusha = "研究社 (Kenkyusha)",
+    wisdom    = "ウィズダム (Wisdom)",
+    genius    = "ジーニアス (Genius)",
+    dojg      = "文法 (DOJG Grammar)",
+}
 
--- Parse URL once at load time so async_post doesn't need to repeat it.
-local _ORCH_HOST, _ORCH_PORT, _ORCH_PATH
-do
-    local h, p, pa = ORCHESTRATOR_URL:match("http://([^:/]+):(%d+)(.*)")
-    _ORCH_HOST = h  or "192.168.0.120"
-    _ORCH_PORT = tonumber(p) or 8002
-    _ORCH_PATH = (pa and pa ~= "") and pa or "/analyze"
+local function _cfg_bool(key, default)
+    local v = G_reader_settings:readSetting(key)
+    if v == nil then return default end
+    return v
 end
+
+local function _dict_order()
+    return G_reader_settings:readSetting("yomitsu_dict_order") or DICT_DEFAULT_ORDER
+end
+
+local function _dict_disabled_set()
+    local list = G_reader_settings:readSetting("yomitsu_dict_disabled") or {}
+    local s = {}
+    for _, k in ipairs(list) do s[k] = true end
+    return s
+end
+
+-- All Lua traffic goes to port 8002 only — the orchestrator proxies internally.
+-- _ORCH_HOST is overwritten at init() from G_reader_settings if the user has saved a value.
+local _ORCH_HOST   = "192.168.0.120"
+local _ORCH_PORT   = 8002
+local _DICT_HOST   = _ORCH_HOST
+local _DICT_PORT   = _ORCH_PORT
+local _DICT_PATH   = "/analyze-dict"
+local TIMEOUT_SECS = 20
 
 local original_onLookupWord = ReaderDictionary.onLookupWord
 local original_lookup       = ReaderDictionary.lookup
@@ -140,6 +244,20 @@ local _active_box   = nil
 local _last_word    = nil
 local _last_word_t  = 0
 local DEBOUNCE_SECS = 3   -- seconds to ignore the same word after showing a result
+
+-- Frequency tier labels (module-level so buildLoadingHtml and buildAiHtml both use them)
+local function _freq_label_jpdb(n)
+    if n <= 1500  then return "muy común"
+    elseif n <= 5000  then return "común"
+    elseif n <= 10000 then return "poco común"
+    else return "raro" end
+end
+local function _freq_label_bccwj(n)
+    if n <= 3000  then return "muy común"
+    elseif n <= 8000  then return "común"
+    elseif n <= 15000 then return "poco común"
+    else return "raro" end
+end
 
 local function hasJapanese(text)
     if not text then return false end
@@ -403,32 +521,26 @@ local function get_sentence_context(scope, word, extra_args)
     return word, nil
 end
 
--- Non-blocking HTTP POST. Uses TCP with settimeout(0) + UIManager:scheduleIn so
--- the event loop keeps running between chunks — the UI stays responsive and taps
--- (e.g. cancel) are processed normally while the request is in flight.
--- Calls on_done(http_code, body_string) on success, on_done(nil, nil) on error/cancel.
-local function async_post(payload, my_id, on_done)
+-- Non-blocking HTTP POST. Calls on_done(http_code, body) on success or on_done(nil, nil) on error/cancel.
+local function async_post_to(host, port, path, payload, my_id, timeout_secs, on_done)
     local socket_lib = require("socket")
     local tcp = socket_lib.tcp()
-
-    -- Short blocking timeout only for the initial TCP connect (localhost ≈ instant).
     tcp:settimeout(0.5)
-    local ok, conn_err = tcp:connect(_ORCH_HOST, _ORCH_PORT)
+    local ok, conn_err = tcp:connect(host, port)
     if not ok then
-        logger.warn("[YOMITSU] No se pudo conectar al orquestador:", conn_err)
+        logger.warn("[YOMITSU] No se pudo conectar a", host .. ":" .. port, conn_err)
         on_done(nil, nil)
         return
     end
-    tcp:settimeout(0)  -- switch to non-blocking for all data I/O
+    tcp:settimeout(0)
 
     local request = string.format(
         "POST %s HTTP/1.0\r\nHost: %s:%d\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-        _ORCH_PATH, _ORCH_HOST, _ORCH_PORT, #payload, payload
+        path, host, port, #payload, payload
     )
-
     local sent     = 0
     local chunks   = {}
-    local deadline = os.time() + TIMEOUT_SECS
+    local deadline = os.time() + timeout_secs
     local done     = false
 
     local function finish(code, body)
@@ -440,30 +552,21 @@ local function async_post(payload, my_id, on_done)
 
     local function step()
         if done then return end
-        if my_id ~= _search_id then finish(nil, nil); return end  -- cancelled
-        if os.time() > deadline  then finish(nil, nil); return end  -- timeout
-
-        -- Send phase: keep sending until the full request is in the socket buffer.
+        if my_id ~= _search_id then finish(nil, nil); return end
+        if os.time() > deadline  then finish(nil, nil); return end
         if sent < #request then
             local n, e, m = tcp:send(request:sub(sent + 1))
-            if n then
-                sent = sent + n
-            elseif e == "timeout" then
-                sent = sent + (m or 0)
-            else
-                finish(nil, nil); return
-            end
+            if n then sent = sent + n
+            elseif e == "timeout" then sent = sent + (m or 0)
+            else finish(nil, nil); return end
             UIManager:scheduleIn(0.03, step)
             return
         end
-
-        -- Receive phase: collect response chunks until server closes the connection.
         local data, e, partial = tcp:receive(8192)
         if data then
             chunks[#chunks+1] = data
             UIManager:scheduleIn(0.03, step)
         elseif e == "closed" then
-            -- HTTP/1.0: server closes connection = end of response.
             if partial and #partial > 0 then chunks[#chunks+1] = partial end
             local response = table.concat(chunks)
             local code = tonumber(response:match("^HTTP/%S+ (%d+)"))
@@ -473,29 +576,140 @@ local function async_post(payload, my_id, on_done)
             chunks[#chunks+1] = partial
             UIManager:scheduleIn(0.03, step)
         else
-            UIManager:scheduleIn(0.03, step)  -- timeout on this chunk, keep waiting
+            UIManager:scheduleIn(0.03, step)
         end
     end
-
     UIManager:scheduleIn(0.02, step)
 end
 
-local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original_word, frequency)
-    local reading_str = (reading and reading ~= "") and
-        (" <i>(" .. _html_esc(reading) .. ")</i>") or ""
+-- Minimal HTTP/1.1 chunked-encoding decoder.
+-- Extracts all complete chunks from buf; returns (decoded_text, remaining_buf).
+local function unchunk(buf)
+    local out = {}
+    while true do
+        local cr = buf:find("\r\n", 1, true)
+        if not cr then break end
+        local hex = buf:sub(1, cr - 1):match("^%s*([0-9a-fA-F]+)")
+        if not hex then break end
+        local sz = tonumber(hex, 16)
+        if not sz then break end
+        if sz == 0 then buf = ""; break end          -- terminal chunk
+        local ds = cr + 2
+        local de = ds + sz - 1
+        if #buf < de + 2 then break end             -- incomplete, wait for more
+        out[#out+1] = buf:sub(ds, de)
+        buf = buf:sub(de + 3)                        -- skip trailing \r\n
+    end
+    return table.concat(out), buf
+end
 
-    local function _freq_label_jpdb(n)
-        if n <= 1500  then return "muy común"
-        elseif n <= 5000  then return "común"
-        elseif n <= 10000 then return "poco común"
-        else return "raro" end
+-- Extracts \x01value\x01\n metadata header from a streaming response buffer.
+-- Returns (value, rest), ("", buf) if no marker, (false, nil) if header incomplete.
+local function extract_meta(buf)
+    if #buf == 0 or buf:byte(1) ~= 1 then return "", buf end
+    local close = buf:find("\1", 2, true)
+    if not close then return false, nil end
+    local val   = buf:sub(2, close - 1)
+    local after = close + 1
+    if buf:byte(after) == 10 then after = after + 1 end
+    return val, buf:sub(after)
+end
+
+-- Non-blocking streaming HTTP POST (HTTP/1.1 + chunked decoding).
+-- on_chunk(text) is called for each decoded piece of body data as it arrives.
+-- on_done(success) is called when the stream ends or fails.
+local function async_stream_post(host, port, path, payload, my_id, timeout_secs, on_chunk, on_done)
+    local socket_lib = require("socket")
+    local tcp = socket_lib.tcp()
+    tcp:settimeout(0.5)
+    local ok, conn_err = tcp:connect(host, port)
+    if not ok then
+        logger.warn("[YOMITSU] No se pudo conectar (stream) a", host .. ":" .. port, conn_err)
+        on_done(false)
+        return
     end
-    local function _freq_label_bccwj(n)
-        if n <= 3000  then return "muy común"
-        elseif n <= 8000  then return "común"
-        elseif n <= 15000 then return "poco común"
-        else return "raro" end
+    tcp:settimeout(0)
+
+    local request = string.format(
+        "POST %s HTTP/1.1\r\nHost: %s:%d\r\nContent-Type: application/json\r\n"
+        .. "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+        path, host, port, #payload, payload
+    )
+    local sent       = 0
+    local hdr_buf    = ""
+    local hdrs_done  = false
+    local chunked    = false
+    local chunk_buf  = ""
+    local http_ok    = false
+    local deadline   = os.time() + timeout_secs
+    local done       = false
+
+    local function finish(success)
+        if done then return end
+        done = true
+        pcall(function() tcp:close() end)
+        on_done(success)
     end
+
+    local function step()
+        if done then return end
+        if my_id ~= _search_id then finish(false); return end
+        if os.time() > deadline  then finish(false); return end
+
+        if sent < #request then
+            local n, e, m = tcp:send(request:sub(sent + 1))
+            if n then sent = sent + n
+            elseif e == "timeout" then sent = sent + (m or 0)
+            else finish(false); return end
+            UIManager:scheduleIn(0.1, step)
+            return
+        end
+
+        local data, e, partial = tcp:receive(4096)
+        local raw = data or partial
+
+        if raw and #raw > 0 then
+            if not hdrs_done then
+                hdr_buf = hdr_buf .. raw
+                local hend = hdr_buf:find("\r\n\r\n", 1, true)
+                if hend then
+                    local status = hdr_buf:match("^HTTP/%S+ (%d+)")
+                    http_ok  = (status == "200")
+                    chunked  = hdr_buf:lower():find("transfer%-encoding:%s*chunked") ~= nil
+                    hdrs_done = true
+                    local body = hdr_buf:sub(hend + 4)
+                    if http_ok and #body > 0 then
+                        if chunked then
+                            local decoded
+                            decoded, chunk_buf = unchunk(body)
+                            if #decoded > 0 then on_chunk(decoded) end
+                        else
+                            on_chunk(body)
+                        end
+                    end
+                end
+            elseif http_ok then
+                if chunked then
+                    local decoded
+                    chunk_buf = chunk_buf .. raw
+                    decoded, chunk_buf = unchunk(chunk_buf)
+                    if #decoded > 0 then on_chunk(decoded) end
+                else
+                    on_chunk(raw)
+                end
+            end
+        end
+
+        if e == "closed" then
+            finish(http_ok)
+        else
+            UIManager:scheduleIn(0.1, step)
+        end
+    end
+    UIManager:scheduleIn(0.05, step)
+end
+
+local function _build_freq_str(frequency)
     local freq_parts = {}
     if frequency and frequency.jpdb then
         freq_parts[#freq_parts+1] = "<b>JPDB</b> #" .. tostring(frequency.jpdb)
@@ -505,16 +719,34 @@ local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original
         freq_parts[#freq_parts+1] = "<b>BCCWJ</b> #" .. tostring(frequency.bccwj)
             .. " <i>" .. _freq_label_bccwj(frequency.bccwj) .. "</i>"
     end
-    local freq_str = #freq_parts > 0 and
+    return #freq_parts > 0 and
         ('  <font color="gray"><small>' .. table.concat(freq_parts, " · ") .. "</small></font>") or ""
+end
+
+local function buildLoadingHtml(word, reading, frequency, count, kanji)
+    local reading_str = (reading and reading ~= "") and
+        (" <i>(" .. _html_esc(reading) .. ")</i>") or ""
+    local body = '<p><b>' .. _html_esc(word) .. '</b>' .. reading_str .. _build_freq_str(frequency) .. _count_badge(count) .. '</p>\n'
+        .. _build_kanji_html(kanji)
+        .. '<hr/>\n'
+        .. '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.4em 0">'
+        .. '<font color="gray">Traduciendo y analizando...</font></p>'
+    return _XHTML_HEAD .. body .. _XHTML_TAIL
+end
+
+-- Intermediate HTML: shows translation while grammar is still loading.
+-- opts.hide_grammar = true → skip the "Generando desglose..." footer
+local function buildTranslationHtml(word, reading, ai, original_word, frequency, count, kanji, opts)
+    opts = opts or {}
+    local reading_str = (reading and reading ~= "") and
+        (" <i>(" .. _html_esc(reading) .. ")</i>") or ""
+    local freq_str = _build_freq_str(frequency)
 
     local source = ai.source_sentence or ""
     local translation = (ai.translation_and_nuance or "Sin análisis disponible")
         :gsub("^%s+", ""):gsub("%s+$", "")
     translation = _html_esc(translation):gsub("\n", "<br/>")
-    local romaji = romaji_sentence or ""
 
-    -- Highlight the target word inside the Japanese sentence (literal search, no patterns)
     local source_html = ""
     if source ~= "" then
         local esc = _html_esc(source)
@@ -531,38 +763,102 @@ local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original
         end
     end
 
-    local sentence_lines = {}
+    local block = {}
     if source_html ~= "" then
-        sentence_lines[#sentence_lines+1] =
+        block[#block+1] =
             '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.3em 0 0.1em 0">'
             .. source_html .. '</p>'
     end
-    if romaji ~= "" then
-        sentence_lines[#sentence_lines+1] =
-            '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.1em 0 0.1em 0">'
-            .. '<i>' .. _html_esc(romaji) .. '</i></p>'
-    end
-    sentence_lines[#sentence_lines+1] =
+    block[#block+1] =
         '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.1em 0 0.4em 0">'
         .. translation .. '</p>'
-
-    local body = '<p><b>' .. _html_esc(word) .. '</b>' .. reading_str .. freq_str .. '</p>\n'
-        .. '<hr/>\n'
-        .. table.concat(sentence_lines, "\n") .. "\n"
-
-    local gram_text = grammar and grammar.analysis or ""
-    if gram_text ~= "" then
-        local gram_model = (grammar and grammar.model) or ""
-        local gram_footer = gram_model ~= "" and
-            ('\n<p style="margin-top:0.3em"><font color="gray"><small>'
-            .. _html_esc(gram_model) .. '</small></font></p>') or ""
-        body = body .. '<hr/>\n' .. _grammar_lines(gram_text) .. gram_footer .. "\n"
+    if not opts.hide_grammar then
+        block[#block+1] = '<hr/>'
+        block[#block+1] =
+            '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.3em 0">'
+            .. '<font color="#aaa"><i>Generando romaji y desglose...</i></font></p>'
     end
 
-    body = body
+    local body = '<p><b>' .. _html_esc(word) .. '</b>' .. reading_str .. freq_str .. _count_badge(count) .. '</p>\n'
+        .. _build_kanji_html(kanji)
+        .. '<hr/>\n'
+        .. table.concat(block, "\n") .. "\n"
         .. '<p style="margin-top:0.3em"><font color="gray"><small>'
         .. _html_esc(ai.model_used or "desconocido")
         .. '</small></font></p>'
+
+    return _XHTML_HEAD .. body .. _XHTML_TAIL
+end
+
+-- opts.hide_translation = true → skip Japanese source + Spanish translation block
+-- opts.hide_grammar     = true → skip romaji + grammar analysis block
+local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original_word, frequency, count, kanji, opts)
+    opts = opts or {}
+    local reading_str = (reading and reading ~= "") and
+        (" <i>(" .. _html_esc(reading) .. ")</i>") or ""
+    local freq_str = _build_freq_str(frequency)
+    local romaji = (not opts.hide_grammar) and (romaji_sentence or "") or ""
+
+    local body = '<p><b>' .. _html_esc(word) .. '</b>' .. reading_str .. freq_str .. _count_badge(count) .. '</p>\n'
+        .. _build_kanji_html(kanji)
+        .. '<hr/>\n'
+
+    -- Translation block
+    if not opts.hide_translation then
+        local source = ai.source_sentence or ""
+        local translation = (ai.translation_and_nuance or "Sin análisis disponible")
+            :gsub("^%s+", ""):gsub("%s+$", "")
+        translation = _html_esc(translation):gsub("\n", "<br/>")
+
+        local source_html = ""
+        if source ~= "" then
+            local esc = _html_esc(source)
+            source_html = esc
+            for _, t in ipairs({ word or "", original_word or "" }) do
+                if t ~= "" then
+                    local et = _html_esc(t)
+                    local i = esc:find(et, 1, true)
+                    if i then
+                        source_html = esc:sub(1, i-1) .. "【" .. et .. "】" .. esc:sub(i + #et)
+                        break
+                    end
+                end
+            end
+        end
+
+        local block = {}
+        if source_html ~= "" then
+            block[#block+1] =
+                '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.3em 0 0.1em 0">'
+                .. source_html .. '</p>'
+        end
+        block[#block+1] =
+            '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.1em 0 0.4em 0">'
+            .. translation .. '</p>'
+        body = body .. table.concat(block, "\n") .. "\n"
+
+        body = body
+            .. '<p style="margin-top:0.3em"><font color="gray"><small>'
+            .. _html_esc(ai.model_used or "desconocido")
+            .. '</small></font></p>'
+    end
+
+    -- Grammar block
+    if not opts.hide_grammar then
+        if romaji ~= "" then
+            body = body .. '<hr/>\n'
+                .. '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.3em 0 0.3em 0">'
+                .. '<i><font color="#666">' .. _html_esc(romaji) .. '</font></i></p>\n'
+        end
+        local gram_text = grammar and grammar.analysis or ""
+        if gram_text ~= "" then
+            local gram_model = (grammar and grammar.model) or ""
+            local gram_footer = gram_model ~= "" and
+                ('\n<p style="margin-top:0.3em"><font color="gray"><small>'
+                .. _html_esc(gram_model) .. '</small></font></p>') or ""
+            body = body .. '<hr/>\n' .. _grammar_lines(gram_text) .. gram_footer .. "\n"
+        end
+    end
 
     return _XHTML_HEAD .. body .. _XHTML_TAIL
 end
@@ -593,8 +889,8 @@ local function yomitsuInterceptor(scope, text, ...)
     _last_word   = text
     _last_word_t = now
 
-    -- Cada búsqueda lleva un ID. La closure de async_post comprueba my_id ~= _search_id
-    -- antes de cada paso; si el usuario ya inició otra búsqueda (o tocó Cancelar),
+    -- Cada búsqueda lleva un ID. Las closures de async_post_to/async_stream_post comprueban
+    -- my_id ~= _search_id antes de cada paso; si el usuario ya inició otra búsqueda,
     -- el paso en vuelo cierra el socket y sale sin mostrar nada.
     _search_id = _search_id + 1
     local my_id = _search_id
@@ -638,156 +934,340 @@ local function yomitsuInterceptor(scope, text, ...)
         UIManager:scheduleIn(0.7, animate_loading)
     end
 
-    _anim_step = 1
-    local init_box = make_loading_box(_anim_texts[1])
-    _active_box = init_box
-    UIManager:show(init_box)
-    UIManager:scheduleIn(0.7, animate_loading)
-
     -- Extraer contexto de forma síncrona (solo consulta DOM, no red).
     local raw_ctx, word_offset = get_sentence_context(scope, text, extra_args)
     local context   = sanitize(raw_ctx or text)
     local safe_word = sanitize(text)
     logger.info("[YOMITSU] Contexto:", context)
 
-    local payload_tbl = { raw_text = context, target_word = safe_word }
-    if word_offset then
-        payload_tbl.word_offset = word_offset
-    end
-    local ok_enc, payload = pcall(json.encode, payload_tbl)
-    if not ok_enc or not payload then
-        logger.warn("[YOMITSU] json.encode falló, reintentando con contexto mínimo")
-        payload = json.encode({ raw_text = safe_word, target_word = safe_word })
-    end
-
-    async_post(payload, my_id, function(code, body)
-        if my_id ~= _search_id then return end  -- cancelado mientras esperábamos
-
-        -- Cerrar InfoMessage sin activar la cancelación del onCloseWidget
+    -- ── Shared: build viewer and fire AI streams from parsed dict data ──────────
+    local function after_dict(word, reading, frequency, original_word, pos,
+                              jitendex, kenkyusha, wisdom, genius, dojg, kanji)
+        -- Close loading animation (nil-safe: no-op when called from cache hit path)
         anim_done = true
         closing_by_code = true
-        if _active_box then
-            UIManager:close(_active_box)
-            _active_box = nil
-        end
+        if _active_box then UIManager:close(_active_box); _active_box = nil end
+        closing_by_code = false
 
-        if code == 200 and body then
-            logger.info("[YOMITSU] Respuesta 200 OK")
+        -- Read feature flags (read once per lookup for consistency)
+        local show_ia    = _cfg_bool("yomitsu_show_ia", true)
+        local show_trans = _cfg_bool("yomitsu_show_translation", true)
+        local show_gram  = _cfg_bool("yomitsu_show_grammar", true)
+        local d_order    = _dict_order()
+        local d_disabled = _dict_disabled_set()
 
-            local res       = json.decode(body)
-            local word      = res.word_normalized or text
-            local reading   = res.reading or ""
-            local ai        = res.ai_contextual_analysis or {}
-            local grammar         = res.grammar_analysis or {}
-            local romaji_sentence = res.romaji_sentence or ""
-            local frequency       = res.frequency or {}
-            logger.info("[YOMITSU] grammar.analysis len=",
-                tostring(grammar.analysis and #grammar.analysis or 0))
-            local dicts     = res.dictionaries or {}
-            local jitendex  = dicts.jitendex  or {}
-            local kenkyusha = dicts.kenkyusha  or {}
-            local wisdom    = dicts.wisdom     or {}
-            local genius    = dicts.genius     or {}
-            local dojg      = dicts.grammar    or {}
+        -- Lookup data indexed by key for ordered insertion
+        local dict_data = {
+            jitendex  = jitendex,
+            kenkyusha = kenkyusha,
+            wisdom    = wisdom,
+            genius    = genius,
+            dojg      = dojg,
+        }
 
-            local results = {}
+        local lookup_count = save_to_history(word, reading)
 
+        -- Build result list
+        local results = {}
+
+        -- Yomitsu IA tab (position 1, updated in-place by streams)
+        if show_ia then
             table.insert(results, {
                 dict       = "Yomitsu IA",
                 word       = word,
-                definition = buildAiHtml(word, reading, ai, grammar, romaji_sentence, text, frequency),
+                definition = buildLoadingHtml(word, reading, frequency, lookup_count, kanji),
                 is_html    = true,
             })
+        end
 
-            if jitendex.found and jitendex.html ~= "" then
-                table.insert(results, {
-                    dict       = "Jitendex",
-                    word       = word,
-                    definition = jitendex.html,
-                    is_html    = true,
-                })
-            end
-
-            if kenkyusha.found and kenkyusha.html ~= "" then
-                table.insert(results, {
-                    dict       = "研究社 (Kenkyusha)",
-                    word       = word,
-                    definition = kenkyusha.html,
-                    is_html    = true,
-                })
-            end
-
-            if wisdom.found and wisdom.html ~= "" then
-                table.insert(results, {
-                    dict       = "ウィズダム (Wisdom)",
-                    word       = word,
-                    definition = wisdom.html,
-                    is_html    = true,
-                })
-            end
-
-            if genius.found and genius.html ~= "" then
-                table.insert(results, {
-                    dict       = "ジーニアス (Genius)",
-                    word       = word,
-                    definition = genius.html,
-                    is_html    = true,
-                })
-            end
-
-            if dojg.found and dojg.html ~= "" then
-                table.insert(results, {
-                    dict       = "文法 (DOJG Grammar)",
-                    word       = word,
-                    definition = dojg.html,
-                    is_html    = true,
-                })
-            end
-
-            if #results == 1 then
-                table.insert(results, {
-                    dict       = "Diccionario",
-                    word       = word,
-                    definition = "<p>No se encontró definición.</p>",
-                    is_html    = true,
-                })
-            end
-
-            -- Guardar en historial y añadir como pestaña final
-            save_to_history(word, reading)
-            table.insert(results, {
-                dict       = "Historial",
-                word       = word,
-                definition = buildHistoryHtml(word),
-                is_html    = true,
-            })
-
-            -- Reiniciar el debounce desde ahora: evita que un toque accidental
-            -- en espacio vacío justo después de cerrar el popup re-abra la búsqueda.
-            _last_word   = word
-            _last_word_t = os.time()
-
-            local sw = Screen:getWidth()
-            local sh = Screen:getHeight()
-            local viewer = DictQuickLookup:new{
-                ui         = scope.ui,
-                lookupword = word,
-                is_html    = true,
-                results    = results,
-                width      = sw - 20,
-                height     = sh,  -- full screen height; DictQuickLookup will clamp internally
-            }
-            UIManager:show(viewer)
-
-        else
-            logger.warn("[YOMITSU] Error o cancelación. Código HTTP:", tostring(code))
-            if code then  -- sólo mostrar error si fue fallo real, no cancelación
-                UIManager:show(InfoMessage:new{
-                    text    = "Error Yomitsu: código " .. tostring(code),
-                    timeout = 3,
-                })
+        -- Dictionaries in user-configured order, skipping disabled ones
+        local dict_count = 0
+        for _, key in ipairs(d_order) do
+            if not d_disabled[key] then
+                local d = dict_data[key]
+                if d and d.found and (d.html_content or "") ~= "" then
+                    table.insert(results, {
+                        dict       = DICT_VIEWER_NAMES[key] or key,
+                        word       = word,
+                        definition = d.html_content,
+                        is_html    = true,
+                    })
+                    dict_count = dict_count + 1
+                end
             end
         end
+
+        if not show_ia and dict_count == 0 then
+            table.insert(results, {
+                dict       = "Diccionario",
+                word       = word,
+                definition = "<p>No se encontró definición.</p>",
+                is_html    = true,
+            })
+        end
+
+        table.insert(results, {
+            dict       = "Historial",
+            word       = word,
+            definition = buildHistoryHtml(word),
+            is_html    = true,
+        })
+
+        _last_word   = word
+        _last_word_t = os.time()
+
+        local sw = Screen:getWidth()
+        local sh = Screen:getHeight()
+        local viewer = DictQuickLookup:new{
+            ui         = scope.ui,
+            lookupword = word,
+            is_html    = true,
+            results    = results,
+            width      = sw - 20,
+            height     = sh,
+        }
+        local current_viewer = viewer
+
+        -- Hooking onCloseWidget lets us cancel in-flight phase-2 requests
+        -- when the user manually closes the popup (prevents ghost popups).
+        local function hook_close(v)
+            local orig = v.onCloseWidget
+            v.onCloseWidget = function(self)
+                if not closing_by_code then
+                    _search_id   = _search_id + 1
+                    current_viewer = nil
+                end
+                if orig then return orig(self) end
+            end
+        end
+
+        hook_close(viewer)
+        UIManager:show(viewer)
+
+        -- Shared payload for both streaming requests
+        local ok_ai, ai_payload = pcall(json.encode, {
+            context_phrase = context,
+            target_word    = word,
+            original_word  = original_word,
+            part_of_speech = pos,
+        })
+        if not ok_ai or not ai_payload then return end
+
+        -- In-place update via KOReader's own changeDictionary — no close/reopen.
+        -- Silent if user is on a different tab; visible when they navigate back.
+        local function update_yomitsu_ia(new_html)
+            if my_id ~= _search_id then return end
+            if not current_viewer then return end
+            results[1].definition = new_html
+            if current_viewer.dict_index == 1 then
+                pcall(function() current_viewer:changeDictionary(1) end)
+            end
+        end
+
+        -- ── Streaming state ──────────────────────────────────────────────────────
+        -- Streaming HTTP is used so the server never needs to buffer the full
+        -- response. Display is updated only twice (translation done, grammar done)
+        -- to avoid e-ink full-screen refreshes during generation.
+        local trans_meta_done, trans_meta_buf = false, ""
+        local trans_buf, trans_source, trans_model = "", "", ""
+
+        local gram_meta_done, gram_meta_buf = false, ""
+        local gram_buf, gram_romaji, gram_model = "", "", ""
+        local gram_done = false  -- true once on_gram_done has rendered the full analysis
+
+        -- ── Translation stream ────────────────────────────────────────────────────
+        local function on_trans_chunk(chunk)
+            if not trans_meta_done then
+                trans_meta_buf = trans_meta_buf .. chunk
+                local meta, rest = extract_meta(trans_meta_buf)
+                if meta == false then return end
+                if meta ~= "" then
+                    local ok_m, obj = pcall(json.decode, meta)
+                    if ok_m and obj then
+                        trans_source = obj.s or ""
+                        trans_model  = obj.m or ""
+                    end
+                end
+                trans_meta_done = true
+                trans_meta_buf  = ""
+                if rest and #rest > 0 then trans_buf = rest end
+            else
+                trans_buf = trans_buf .. chunk
+            end
+            -- No display update during streaming: e-ink full-screen refresh every
+            -- 350ms blocks interaction. Display once when stream completes.
+        end
+
+        local function on_trans_done(success)
+            if my_id ~= _search_id then return end
+            if trans_buf == "" then trans_buf = "Sin traducción." end
+            local ai = {
+                translation_and_nuance = trans_buf,
+                source_sentence        = trans_source,
+                model_used             = trans_model ~= "" and trans_model or "Hy-MT2-7B",
+            }
+            local opts = { hide_grammar = not show_gram }
+            if gram_done or not show_gram then
+                local grammar = gram_done
+                    and { analysis = gram_buf, model = gram_model ~= "" and gram_model or "gpt-4.1-mini" }
+                    or nil
+                update_yomitsu_ia(buildAiHtml(word, reading, ai, grammar, gram_romaji, original_word, frequency, lookup_count, kanji, opts))
+            else
+                update_yomitsu_ia(buildTranslationHtml(word, reading, ai, original_word, frequency, lookup_count, kanji, opts))
+            end
+            logger.info("[YOMITSU] Traducción completada")
+        end
+
+        -- ── Grammar stream ────────────────────────────────────────────────────────
+        local function on_gram_chunk(chunk)
+            if not gram_meta_done then
+                gram_meta_buf = gram_meta_buf .. chunk
+                local meta, rest = extract_meta(gram_meta_buf)
+                if meta == false then return end
+                if meta ~= "" then
+                    local ok_m, obj = pcall(json.decode, meta)
+                    if ok_m and obj then
+                        gram_romaji = obj.romaji or ""
+                        gram_model  = obj.model  or ""
+                    end
+                end
+                gram_meta_done = true
+                gram_meta_buf  = ""
+                if rest and #rest > 0 then gram_buf = rest end
+            else
+                gram_buf = gram_buf .. chunk
+            end
+        end
+
+        local function on_gram_done(success)
+            if my_id ~= _search_id then return end
+            if not success and gram_buf == "" then
+                gram_buf = "Análisis no disponible."
+            end
+            -- GPT embeds a ROMAJI section in the body; prefer it over the SudachiPy fallback.
+            local rom = gram_buf:match("\nROMAJI:%s*\n(.-)%s*$")
+                     or gram_buf:match("\nROMAJI:%s*\n(.+)")
+            if rom and rom ~= "" then
+                gram_romaji = rom:match("^%s*(.-)%s*$") or rom
+                gram_buf    = gram_buf:match("^(.-)%s*\nROMAJI:") or gram_buf
+            end
+            local ai = {
+                translation_and_nuance = show_trans and (trans_buf ~= "" and trans_buf or "—") or nil,
+                source_sentence        = show_trans and trans_source or nil,
+                model_used             = show_trans and (trans_model ~= "" and trans_model or "Hy-MT2-7B") or nil,
+            }
+            local grammar = { analysis = gram_buf, model = gram_model ~= "" and gram_model or "gpt-4.1-mini" }
+            gram_done = true
+            local opts = { hide_translation = not show_trans }
+            update_yomitsu_ia(buildAiHtml(word, reading, ai, grammar, gram_romaji, original_word, frequency, lookup_count, kanji, opts))
+            logger.info("[YOMITSU] Gramática completada")
+        end
+
+        -- Fire streams based on settings ─────────────────────────────────────────
+        if show_ia then
+            if show_trans then
+                async_stream_post(_ORCH_HOST, _ORCH_PORT, "/analyze-translation-stream",
+                    ai_payload, my_id, 30, on_trans_chunk, on_trans_done)
+            end
+            if show_gram then
+                async_stream_post(_ORCH_HOST, _ORCH_PORT, "/analyze-grammar-stream",
+                    ai_payload, my_id, 55, on_gram_chunk, on_gram_done)
+            end
+        end
+    end  -- end after_dict
+
+    -- ── Cache check: skip network if we have dict data for this word ────────────
+    local cached = _cache_get(safe_word)
+    if cached then
+        logger.info("[YOMITSU] Cache hit:", safe_word)
+        after_dict(cached.word, cached.reading, cached.frequency, cached.original_word, cached.pos,
+            cached.jitendex, cached.kenkyusha, cached.wisdom, cached.genius, cached.dojg, cached.kanji)
+        return true
+    end
+
+    -- ── Cache miss: show loading animation and do network request ───────────────
+    _anim_step = 1
+    local init_box = make_loading_box(_anim_texts[1])
+    _active_box = init_box
+    UIManager:show(init_box)
+    UIManager:scheduleIn(0.7, animate_loading)
+
+    -- Phase 1 payload → orchestrator /analyze-dict (proxies to dict service)
+    local dict_payload_tbl = {
+        raw_text    = context,
+        target_word = safe_word,
+        word_offset = word_offset,
+    }
+    local ok_enc, dict_payload = pcall(json.encode, dict_payload_tbl)
+    if not ok_enc or not dict_payload then
+        logger.warn("[YOMITSU] json.encode falló, reintentando con contexto mínimo")
+        dict_payload = json.encode({ context_phrase = safe_word, user_selection = safe_word })
+    end
+
+    async_post_to(_DICT_HOST, _DICT_PORT, _DICT_PATH, dict_payload, my_id, 10,
+        function(code1, body1)
+        if my_id ~= _search_id then return end
+
+        -- Parse phase-1 dict response
+        local word, reading, frequency, original_word, pos, kanji
+        local jitendex, kenkyusha, wisdom, genius, dojg = {}, {}, {}, {}, {}
+
+        if code1 == 200 and body1 then
+            local ok1, d1 = pcall(json.decode, body1)
+            if ok1 and d1 then
+                local wd = d1.word_data or {}
+                local dd = d1.dictionary_data or {}
+                word          = wd.normalized_word or safe_word
+                reading       = dd.reading or ""
+                frequency     = dd.frequency or {}
+                original_word = wd.original_word or safe_word
+                pos           = wd.part_of_speech or "unknown"
+                kanji         = dd.kanji_breakdown or {}
+                jitendex  = dd.jitendex  or {}
+                kenkyusha = dd.kenkyusha or {}
+                wisdom    = dd.wisdom    or {}
+                genius    = dd.genius    or {}
+                dojg      = dd.grammar   or {}
+            end
+        end
+        word          = word or safe_word
+        reading       = reading or ""
+        frequency     = frequency or {}
+        original_word = original_word or safe_word
+        pos           = pos or "unknown"
+        kanji         = kanji or {}
+
+        -- Server unreachable (nil code = connection refused/timeout) →
+        -- hand off to KOReader's built-in dictionary instead of showing an error popup.
+        if not code1 then
+            logger.warn("[YOMITSU] Servidor no disponible, usando diccionario por defecto")
+            anim_done = true
+            closing_by_code = true
+            if _active_box then UIManager:close(_active_box); _active_box = nil end
+            closing_by_code = false
+            if original_onLookupWord then
+                original_onLookupWord(scope, text, unpack(extra_args))
+            elseif original_lookup then
+                original_lookup(scope, text, unpack(extra_args))
+            end
+            return
+        end
+        if code1 ~= 200 then
+            logger.warn("[YOMITSU] Error diccionario HTTP:", tostring(code1))
+        end
+
+        -- Cache the parsed result for instant re-lookup this session
+        if code1 == 200 then
+            _cache_set(safe_word, {
+                word = word, reading = reading, frequency = frequency,
+                original_word = original_word, pos = pos, kanji = kanji,
+                jitendex = jitendex, kenkyusha = kenkyusha,
+                wisdom = wisdom, genius = genius, dojg = dojg,
+            })
+        end
+
+        after_dict(word, reading, frequency, original_word, pos,
+            jitendex, kenkyusha, wisdom, genius, dojg, kanji)
     end)
 
     return true
@@ -797,6 +1277,188 @@ if ReaderDictionary.onLookupWord then
     ReaderDictionary.onLookupWord = yomitsuInterceptor
 else
     ReaderDictionary.lookup = yomitsuInterceptor
+end
+
+-- ---------------------------------------------------------------------------
+-- KOReader plugin lifecycle & menu
+-- ---------------------------------------------------------------------------
+
+function Yomitsu:init()
+    local saved_host = G_reader_settings:readSetting("yomitsu_server_host")
+    if saved_host and saved_host ~= "" then
+        _ORCH_HOST = saved_host
+        _DICT_HOST = saved_host
+    end
+    if self.ui and self.ui.menu then
+        self.ui.menu:registerToMainMenu(self)
+    end
+end
+
+function Yomitsu:_showServerDialog(touchmenu_instance)
+    local dialog
+    dialog = InputDialog:new{
+        title    = "IP del servidor Yomitsu",
+        input    = _ORCH_HOST,
+        input_hint = "192.168.0.120",
+        buttons  = {{
+            {
+                text = "Cancelar",
+                id   = "close",
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text             = "Guardar",
+                is_enter_default = true,
+                callback = function()
+                    local ip = dialog:getInputText()
+                    ip = ip and ip:match("^%s*(.-)%s*$") or ""
+                    if ip ~= "" then
+                        _ORCH_HOST = ip
+                        _DICT_HOST = ip
+                        G_reader_settings:saveSetting("yomitsu_server_host", ip)
+                        if touchmenu_instance then
+                            touchmenu_instance:updateItems()
+                        end
+                    end
+                    UIManager:close(dialog)
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+function Yomitsu:addToMainMenu(menu_items)
+    local order = require("ui/elements/reader_menu_order")
+    if order.tools and order.tools[1] ~= "yomitsu" then
+        table.insert(order.tools, 1, "yomitsu")
+    end
+
+    local function toggle(key, default, tmi)
+        G_reader_settings:saveSetting(key, not _cfg_bool(key, default))
+        if tmi then tmi:updateItems() end
+    end
+
+    -- Build dict sub-items dynamically so order/enabled state is always fresh
+    local function dict_sub_items()
+        local cur_order = _dict_order()
+        local dis_set   = _dict_disabled_set()
+        local items = {}
+        for _, key in ipairs(cur_order) do
+            local def_label
+            for _, d in ipairs(DICTS) do
+                if d.key == key then def_label = d.label; break end
+            end
+            if not def_label then goto continue end
+            local k = key
+            local lbl = def_label
+            items[#items+1] = {
+                text_func = function()
+                    local o = _dict_order()
+                    for i, kk in ipairs(o) do
+                        if kk == k then return tostring(i) .. ". " .. lbl end
+                    end
+                    return lbl
+                end,
+                checked_func = function()
+                    return not _dict_disabled_set()[k]
+                end,
+                callback = function(tmi)
+                    local list = G_reader_settings:readSetting("yomitsu_dict_disabled") or {}
+                    local found = false
+                    for i, kk in ipairs(list) do
+                        if kk == k then table.remove(list, i); found = true; break end
+                    end
+                    if not found then list[#list+1] = k end
+                    G_reader_settings:saveSetting("yomitsu_dict_disabled", list)
+                    if tmi then tmi:updateItems() end
+                end,
+                hold_callback = function(tmi)
+                    local function do_move(delta)
+                        local o = _dict_order()
+                        for i, kk in ipairs(o) do
+                            if kk == k then
+                                local ni = i + delta
+                                if ni >= 1 and ni <= #o then
+                                    o[i], o[ni] = o[ni], o[i]
+                                    G_reader_settings:saveSetting("yomitsu_dict_order", o)
+                                end
+                                break
+                            end
+                        end
+                        UIManager:close(dialog)
+                        -- Rebuild and replace item_table in-place so updateItems()
+                        -- sees the new order without closing the sub-menu.
+                        if tmi then
+                            local new_items = dict_sub_items()
+                            for i = #tmi.item_table, 1, -1 do
+                                tmi.item_table[i] = nil
+                            end
+                            for i, item in ipairs(new_items) do
+                                tmi.item_table[i] = item
+                            end
+                            tmi:updateItems()
+                        end
+                    end
+                    local dialog
+                    dialog = ButtonDialog:new{
+                        buttons = {
+                            {{ text = "↑ Subir", callback = function() do_move(-1) end }},
+                            {{ text = "↓ Bajar", callback = function() do_move( 1) end }},
+                            {{ text = "Cerrar",  callback = function() UIManager:close(dialog) end }},
+                        },
+                    }
+                    UIManager:show(dialog)
+                end,
+            }
+            ::continue::
+        end
+        -- Hint line at the bottom (non-interactive, grayed out)
+        if #items > 0 then
+            items[#items+1] = {
+                text = "Mantén pulsado un diccionario para reordenar",
+                enabled_func = function() return false end,
+            }
+        end
+        return items
+    end
+
+    menu_items.yomitsu = {
+        text = "Yomitsu",
+        sub_item_table = {
+            {
+                text_func = function()
+                    return "Servidor: " .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT)
+                end,
+                keep_menu_open = true,
+                callback = function(tmi) self:_showServerDialog(tmi) end,
+            },
+            {
+                text = "Yomitsu IA",
+                checked_func = function() return _cfg_bool("yomitsu_show_ia", true) end,
+                callback = function(tmi) toggle("yomitsu_show_ia", true, tmi) end,
+            },
+            {
+                text = "  └ Traducción",
+                checked_func = function() return _cfg_bool("yomitsu_show_translation", true) end,
+                enabled_func = function() return _cfg_bool("yomitsu_show_ia", true) end,
+                callback = function(tmi) toggle("yomitsu_show_translation", true, tmi) end,
+            },
+            {
+                text = "  └ Desglose",
+                checked_func = function() return _cfg_bool("yomitsu_show_grammar", true) end,
+                enabled_func = function() return _cfg_bool("yomitsu_show_ia", true) end,
+                callback = function(tmi) toggle("yomitsu_show_grammar", true, tmi) end,
+            },
+            {
+                text = "Diccionarios",
+                sub_item_table_func = dict_sub_items,
+            },
+        },
+    }
 end
 
 return Yomitsu

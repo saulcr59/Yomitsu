@@ -1,0 +1,40 @@
+services:
+  dictionary:
+    build: ./dictionary-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./dictionary-service/dictionaries:/app/dictionaries:ro
+    restart: unless-stopped
+
+  translator:
+    build: ./translator-service
+    ports:
+      - "8001:8001"
+    environment:
+      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434/api/generate}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  grammar:
+    build: ./grammar-analysis-service
+    ports:
+      - "8003:8003"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    restart: unless-stopped
+
+  orchestrator:
+    build: ./orchestrator-service
+    ports:
+      - "8002:8002"
+    environment:
+      - DICT_URL=http://dictionary:8000
+      - TRANSLATOR_URL=http://translator:8001
+      - GRAMMAR_URL=http://grammar:8003
+    depends_on:
+      - dictionary
+      - translator
+      - grammar
+    restart: unless-stopped
