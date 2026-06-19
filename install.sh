@@ -56,9 +56,20 @@ $(. /etc/os-release && echo "${VERSION_CODENAME}") stable" \
     apt-get install -y -qq \
         docker-ce docker-ce-cli containerd.io \
         docker-buildx-plugin docker-compose-plugin
-    systemctl enable --now docker
+    systemctl enable docker
+    systemctl start docker || true
     info "Docker instalado: $(docker --version)"
 fi
+
+# Esperar a que el daemon esté listo (hasta 30s)
+echo -n "  Esperando Docker daemon"
+for i in $(seq 1 15); do
+    docker info &>/dev/null && break
+    echo -n "."
+    sleep 2
+done
+echo
+docker info &>/dev/null || die "Docker daemon no responde. Revisa: journalctl -xeu docker.service"
 
 # ---------------------------------------------------------------------------
 # Ollama
