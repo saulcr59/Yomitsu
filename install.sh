@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Yomitsu — instalador para Ubuntu
-# Uso: sudo bash install.sh
+#
+# Uso desde el repo ya clonado (recomendado para repos privados):
+#   git clone git@github.com:saulcr59/Yomitsu.git /opt/yomitsu
+#   sudo bash /opt/yomitsu/install.sh
+#
+# Uso con token de GitHub (repo privado, sin SSH):
+#   sudo bash install.sh --token <GITHUB_PAT>
 set -euo pipefail
 
 REPO_URL="https://github.com/saulcr59/Yomitsu.git"
 INSTALL_DIR="/opt/yomitsu"
 OLLAMA_MODEL="hf.co/unsloth/Hy-MT2-7B-GGUF:UD-Q4_K_XL"
+GH_TOKEN=""
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -15,6 +22,16 @@ step() { echo; echo "==> $*"; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "Ejecutar como root: sudo bash install.sh"
+
+# ---------------------------------------------------------------------------
+# Args
+# ---------------------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --token) GH_TOKEN="$2"; shift 2 ;;
+        *) die "Argumento desconocido: $1" ;;
+    esac
+done
 
 # ---------------------------------------------------------------------------
 # Docker
@@ -60,12 +77,23 @@ info "Modelo listo."
 # Repositorio
 # ---------------------------------------------------------------------------
 step "Repositorio Yomitsu"
-if [[ -d "$INSTALL_DIR/.git" ]]; then
-    info "Ya clonado — actualizando..."
+
+# Si el script se ejecuta desde dentro del repo clonado, usarlo directamente.
+SCRIPT_DIR="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"
+if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
+    info "Ejecutando desde el repositorio en $SCRIPT_DIR"
+    INSTALL_DIR="$SCRIPT_DIR"
+elif [[ -d "$INSTALL_DIR/.git" ]]; then
+    info "Ya clonado en $INSTALL_DIR — actualizando..."
     git -C "$INSTALL_DIR" pull
 else
+    if [[ -n "$GH_TOKEN" ]]; then
+        CLONE_URL="https://${GH_TOKEN}@github.com/saulcr59/Yomitsu.git"
+    else
+        CLONE_URL="$REPO_URL"
+    fi
     info "Clonando en $INSTALL_DIR..."
-    git clone "$REPO_URL" "$INSTALL_DIR"
+    git clone "$CLONE_URL" "$INSTALL_DIR"
 fi
 
 # ---------------------------------------------------------------------------

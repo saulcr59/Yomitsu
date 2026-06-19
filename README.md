@@ -21,21 +21,40 @@ A self-hosted Japanese immersion ecosystem for KOReader. Long-press any word →
 
 ---
 
-## Installation (Ubuntu — one command)
+## Installation (Ubuntu)
+
+### Option A — SSH (recommended)
+
+Requires an SSH key added to your GitHub account on the target machine.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/saulcr59/Yomitsu/main/install.sh | sudo bash
+git clone git@github.com:saulcr59/Yomitsu.git /opt/yomitsu
+sudo bash /opt/yomitsu/install.sh
 ```
+
+### Option B — GitHub Personal Access Token
+
+Generate a token at **GitHub → Settings → Developer settings → Personal access tokens** with `repo` scope, then:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/saulcr59/Yomitsu/main/install.sh)" -- --token YOUR_TOKEN
+```
+
+Or clone manually first:
+
+```bash
+git clone https://YOUR_TOKEN@github.com/saulcr59/Yomitsu.git /opt/yomitsu
+sudo bash /opt/yomitsu/install.sh
+```
+
+---
 
 The script will:
 
 1. Install Docker Engine and the Compose plugin
 2. Install Ollama and download the `Hy-MT2-7B` translation model
-3. Clone this repository to `/opt/yomitsu`
-4. Ask for your `OPENAI_API_KEY` and write `/opt/yomitsu/.env`
-5. Build and start all four services with `docker compose up -d`
-
-At the end it prints the active ports and the service management commands.
+3. Ask for your `OPENAI_API_KEY` and write `.env`
+4. Build and start all four services with `docker compose up -d`
 
 > **Note:** The model download (~5 GB) can take several minutes depending on your connection.
 
