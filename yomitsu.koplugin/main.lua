@@ -473,13 +473,18 @@ local function get_sentence_context(scope, word, extra_args)
                 end
             end
         end
-        -- mokuroreader stores full block text in highlight_info
-        local hi = hl.highlight_info
-        if type(hi) == "table" then
-            local t = type(hi.text) == "string" and hi.text or ""
-            if #t > #word then
-                logger.info("[YOMITSU] Contexto de mokuro highlight_info:", t)
-                return t, nil
+        -- mokuroreader injects getSelectedWordContext as a closure with
+        -- prev_context/next_context captured — must be called, not read as fields.
+        if type(hl.getSelectedWordContext) == "function" then
+            local ok, prev, nxt = pcall(hl.getSelectedWordContext, hl, 20)
+            if ok then
+                prev = prev or ""
+                nxt  = nxt  or ""
+                if prev ~= "" or nxt ~= "" then
+                    local full = prev .. word .. nxt
+                    logger.info("[YOMITSU] Contexto de mokuro:", full)
+                    return full, #prev
+                end
             end
         end
     end
