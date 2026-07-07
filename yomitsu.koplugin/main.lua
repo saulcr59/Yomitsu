@@ -421,6 +421,13 @@ local function get_sentence_context(scope, word, extra_args)
             local t = (type(v.text) == "string" and v.text)
                    or (type(v.word) == "string" and v.word) or ""
             if #t > #word then return t, nil end
+            -- mokuroreader: prev_context / next_context as separate fields
+            local prev = type(v.prev_context) == "string" and v.prev_context or ""
+            local nxt  = type(v.next_context) == "string" and v.next_context or ""
+            if prev ~= "" or nxt ~= "" then
+                local full = prev .. text .. nxt
+                if #full > #text then return full, #prev end
+            end
             -- XPointer positions
             if type(v.pos0) == "string" and not xptr0 then
                 xptr0 = v.pos0
@@ -447,15 +454,32 @@ local function get_sentence_context(scope, word, extra_args)
     if hl then
         for _, sel in ipairs({hl.selected_text, hl.selected_word}) do
             if type(sel) == "table" then
+                -- Standard fields
                 local t = (type(sel.text)     == "string" and sel.text)
                        or (type(sel.word)     == "string" and sel.word)
                        or (type(sel.context)  == "string" and sel.context)
                        or (type(sel.sentence) == "string" and sel.sentence) or ""
                 if #t > #word then return t, nil end
+                -- mokuroreader passes prev_context / next_context separately
+                local prev = type(sel.prev_context) == "string" and sel.prev_context or ""
+                local next = type(sel.next_context) == "string" and sel.next_context or ""
+                if prev ~= "" or next ~= "" then
+                    local full = prev .. word .. next
+                    if #full > #word then return full, #prev end
+                end
                 if type(sel.pos0) == "string" and not xptr0 then
                     xptr0 = sel.pos0
                     xptr1 = type(sel.pos1) == "string" and sel.pos1 or sel.pos0
                 end
+            end
+        end
+        -- mokuroreader stores full block text in highlight_info
+        local hi = hl.highlight_info
+        if type(hi) == "table" then
+            local t = type(hi.text) == "string" and hi.text or ""
+            if #t > #word then
+                logger.info("[YOMITSU] Contexto de mokuro highlight_info:", t)
+                return t, nil
             end
         end
     end
