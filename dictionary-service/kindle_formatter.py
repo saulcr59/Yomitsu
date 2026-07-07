@@ -340,7 +340,8 @@ def _render_entry(sc_content, reading: str) -> str:
     # Formas alternativas
     if forms:
         parts.append(
-            f'<p style="color:#666; margin-top:0.4em">'
+            f'<p><i><font color="#555">alternative forms</font></i></p>'
+            f'<p style="color:#666; margin-top:0.1em">'
             f'{_esc(" / ".join(forms[:6]))}</p>'
         )
 

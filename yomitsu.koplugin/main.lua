@@ -297,12 +297,27 @@ local function _dict_disabled_set()
 end
 
 -- All Lua traffic goes to port 8002 only — the orchestrator proxies internally.
--- _ORCH_HOST is overwritten at init() from G_reader_settings if the user has saved a value.
-local _ORCH_HOST   = "192.168.0.120"
-local _ORCH_PORT   = 8002
-local _DICT_HOST   = _ORCH_HOST
-local _DICT_PORT   = _ORCH_PORT
-local _DICT_PATH   = "/analyze-dict"
+-- These are overwritten at init() from G_reader_settings if the user has saved values.
+local _ORCH_HOST      = "192.168.0.120"
+local _ORCH_PORT      = 8002
+local _ORCH_HOST_AWAY = ""
+local _ORCH_PORT_AWAY = 8002
+local _ORCH_USE_AWAY  = false
+local _DICT_HOST      = _ORCH_HOST
+local _DICT_PORT      = _ORCH_PORT
+local _DICT_PATH      = "/analyze-dict"
+
+local function _parse_host_port(s)
+    s = (s or ""):match("^%s*(.-)%s*$"):gsub("^https?://", ""):gsub("/$", "")
+    local host, port = s:match("^(.+):(%d+)$")
+    if host and port then return host, tonumber(port) end
+    return s ~= "" and s or nil, nil
+end
+
+local function _apply_server(host, port)
+    _ORCH_HOST = host; _ORCH_PORT = port
+    _DICT_HOST = host; _DICT_PORT = port
+end
 local TIMEOUT_SECS = 20
 
 local original_onLookupWord = ReaderDictionary.onLookupWord
@@ -312,6 +327,7 @@ local original_lookup       = ReaderDictionary.lookup
 local _search_id    = 0
 local _active_box   = nil
 local _last_word    = nil
+local _prev_word    = nil
 local _last_word_t  = 0
 local DEBOUNCE_SECS = 3   -- seconds to ignore the same word after showing a result
 
@@ -412,6 +428,12 @@ end
 -- word_offset lets Python find the exact Sudachi token even when the same character
 -- appears multiple times on the page (e.g. 日 in both 今日 and 本日).
 local function get_sentence_context(scope, word, extra_args)
+    -- Sub-lookup from inside DictQuickLookup: no real context available.
+    -- Return the word itself so SudachiPy tokenizes only that, not the old sentence.
+    if scope.lookupword ~= nil then
+        return word, 0
+    end
+
     local doc = scope.ui and scope.ui.document
     local hl  = scope.ui and scope.ui.highlight
 
@@ -490,6 +512,7 @@ local function get_sentence_context(scope, word, extra_args)
             -- Inline text shortcut
             local t = (type(v.text) == "string" and v.text)
                    or (type(v.word) == "string" and v.word) or ""
+            if t == _prev_word and t ~= word then t = "" end
             if #t > #word then return t, nil end
             -- mokuroreader: prev_context / next_context as separate fields
             local prev = type(v.prev_context) == "string" and v.prev_context or ""
@@ -529,6 +552,8 @@ local function get_sentence_context(scope, word, extra_args)
                        or (type(sel.word)     == "string" and sel.word)
                        or (type(sel.context)  == "string" and sel.context)
                        or (type(sel.sentence) == "string" and sel.sentence) or ""
+                -- Skip stale data from the previous lookup (sub-lookup from popup).
+                if t == _prev_word and t ~= word then t = "" end
                 if #t > #word then return t, nil end
                 -- mokuroreader passes prev_context / next_context separately
                 local prev = type(sel.prev_context) == "string" and sel.prev_context or ""
@@ -985,6 +1010,7 @@ local function yomitsuInterceptor(scope, text, ...)
         logger.info("[YOMITSU] Saltando duplicado:", text)
         return true
     end
+    _prev_word   = _last_word
     _last_word   = text
     _last_word_t = now
 
@@ -1395,43 +1421,49 @@ end
 -- ---------------------------------------------------------------------------
 
 function Yomitsu:init()
-    local saved_host = G_reader_settings:readSetting("yomitsu_server_host")
-    if saved_host and saved_host ~= "" then
-        _ORCH_HOST = saved_host
-        _DICT_HOST = saved_host
+    local h = G_reader_settings:readSetting("yomitsu_server_host")
+    local p = G_reader_settings:readSetting("yomitsu_server_port")
+    if h and h ~= "" then _ORCH_HOST = h end
+    if p then _ORCH_PORT = p end
+
+    local ha = G_reader_settings:readSetting("yomitsu_server_host_away")
+    local pa = G_reader_settings:readSetting("yomitsu_server_port_away")
+    if ha and ha ~= "" then _ORCH_HOST_AWAY = ha end
+    if pa then _ORCH_PORT_AWAY = pa end
+
+    _ORCH_USE_AWAY = G_reader_settings:readSetting("yomitsu_use_away") or false
+    if _ORCH_USE_AWAY and _ORCH_HOST_AWAY ~= "" then
+        _apply_server(_ORCH_HOST_AWAY, _ORCH_PORT_AWAY)
+    else
+        _apply_server(_ORCH_HOST, _ORCH_PORT)
     end
+
     if self.ui and self.ui.menu then
         self.ui.menu:registerToMainMenu(self)
     end
 end
 
-function Yomitsu:_showServerDialog(touchmenu_instance)
+function Yomitsu:_showUrlDialog(title, current_host, current_port, hint, on_save, tmi)
     local dialog
+    local current = current_host ~= "" and (current_host .. ":" .. tostring(current_port)) or ""
     dialog = InputDialog:new{
-        title    = "IP del servidor Yomitsu",
-        input    = _ORCH_HOST,
-        input_hint = "192.168.0.120",
-        buttons  = {{
+        title      = title,
+        input      = current,
+        input_hint = hint or "192.168.0.120:8002",
+        buttons    = {{
             {
                 text = "Cancelar",
                 id   = "close",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
+                callback = function() UIManager:close(dialog) end,
             },
             {
                 text             = "Guardar",
                 is_enter_default = true,
                 callback = function()
-                    local ip = dialog:getInputText()
-                    ip = ip and ip:match("^%s*(.-)%s*$") or ""
-                    if ip ~= "" then
-                        _ORCH_HOST = ip
-                        _DICT_HOST = ip
-                        G_reader_settings:saveSetting("yomitsu_server_host", ip)
-                        if touchmenu_instance then
-                            touchmenu_instance:updateItems()
-                        end
+                    local host, port = _parse_host_port(dialog:getInputText())
+                    if host then
+                        on_save(host, port or 8002)
+                        if tmi then tmi:updateItems() end
                     end
                     UIManager:close(dialog)
                 end,
@@ -1440,6 +1472,21 @@ function Yomitsu:_showServerDialog(touchmenu_instance)
     }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
+end
+
+function Yomitsu:_testConnection()
+    local http = require("socket.http")
+    local url  = "http://" .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT) .. "/health"
+    local t0   = os.time()
+    local body, code = http.request(url)
+    local elapsed = os.time() - t0
+    local msg
+    if body and code == 200 then
+        msg = "Conexion OK (" .. elapsed .. "s)\n" .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT)
+    else
+        msg = "Sin respuesta (" .. tostring(code or "error") .. ")\n" .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT)
+    end
+    UIManager:show(InfoMessage:new{ text = msg, timeout = 5 })
 end
 
 function Yomitsu:addToMainMenu(menu_items)
@@ -1545,7 +1592,57 @@ function Yomitsu:addToMainMenu(menu_items)
                     return "Servidor: " .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT)
                 end,
                 keep_menu_open = true,
-                callback = function(tmi) self:_showServerDialog(tmi) end,
+                callback = function(tmi)
+                    self:_showUrlDialog(
+                        "Servidor casa (host:puerto)",
+                        _ORCH_HOST, _ORCH_PORT,
+                        "192.168.0.120:8002",
+                        function(host, port)
+                            _ORCH_HOST = host; _ORCH_PORT = port
+                            G_reader_settings:saveSetting("yomitsu_server_host", host)
+                            G_reader_settings:saveSetting("yomitsu_server_port", port)
+                            if not _ORCH_USE_AWAY then _apply_server(host, port) end
+                        end, tmi)
+                end,
+            },
+            {
+                text_func = function()
+                    local h = _ORCH_HOST_AWAY ~= "" and _ORCH_HOST_AWAY or "no configurado"
+                    return "Servidor secundario: " .. h .. ":" .. tostring(_ORCH_PORT_AWAY)
+                end,
+                keep_menu_open = true,
+                callback = function(tmi)
+                    self:_showUrlDialog(
+                        "Servidor fuera (host:puerto)",
+                        _ORCH_HOST_AWAY, _ORCH_PORT_AWAY,
+                        "example.ddns.net:8002",
+                        function(host, port)
+                            _ORCH_HOST_AWAY = host; _ORCH_PORT_AWAY = port
+                            G_reader_settings:saveSetting("yomitsu_server_host_away", host)
+                            G_reader_settings:saveSetting("yomitsu_server_port_away", port)
+                            if _ORCH_USE_AWAY then _apply_server(host, port) end
+                        end, tmi)
+                end,
+            },
+            {
+                text_func = function()
+                    return "Usar servidor secundario"
+                end,
+                checked_func = function() return _ORCH_USE_AWAY end,
+                callback = function(tmi)
+                    _ORCH_USE_AWAY = not _ORCH_USE_AWAY
+                    G_reader_settings:saveSetting("yomitsu_use_away", _ORCH_USE_AWAY)
+                    if _ORCH_USE_AWAY and _ORCH_HOST_AWAY ~= "" then
+                        _apply_server(_ORCH_HOST_AWAY, _ORCH_PORT_AWAY)
+                    else
+                        _apply_server(_ORCH_HOST, _ORCH_PORT)
+                    end
+                    if tmi then tmi:updateItems() end
+                end,
+            },
+            {
+                text = "Test de conexion",
+                callback = function() self:_testConnection() end,
             },
             {
                 text = "Yomitsu IA",
