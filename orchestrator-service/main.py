@@ -3,9 +3,13 @@ import os
 import httpx
 import logging
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from openai import AsyncOpenAI
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,13 +20,17 @@ logger = logging.getLogger("YOMITSU-ORCHESTRATOR")
 
 GRAMMAR_MODEL = "gpt-4.1-mini"
 
-_http_client: httpx.AsyncClient = None  # type: ignore[assignment]  # assigned by lifespan
+_http_client: httpx.AsyncClient = None  # type: ignore[assignment]
+_oai_client: AsyncOpenAI | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _http_client
+    global _http_client, _oai_client
     _http_client = httpx.AsyncClient(timeout=5.0)
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if api_key:
+        _oai_client = AsyncOpenAI(api_key=api_key)
     yield
     await _http_client.aclose()
 
@@ -39,9 +47,7 @@ _GRAMMAR_BASE    = os.environ.get("GRAMMAR_URL",    "http://localhost:8003")
 
 DICT_TOKENIZE_URL        = f"{_DICT_BASE}/tokenize"
 DICTIONARY_SERVICE_URL   = f"{_DICT_BASE}/extract-word"
-TRANSLATOR_SERVICE_URL   = f"{_TRANSLATOR_BASE}/translate"
 TRANSLATOR_STREAM_URL    = f"{_TRANSLATOR_BASE}/stream-translate"
-GRAMMAR_SERVICE_URL      = f"{_GRAMMAR_BASE}/analyze-grammar"
 GRAMMAR_STREAM_URL       = f"{_GRAMMAR_BASE}/stream-grammar"
 
 
@@ -56,10 +62,16 @@ class AnalyzeAiRequest(BaseModel):
     target_word: str
     original_word: str
     part_of_speech: str
+    page_context: str = ""
+
+
+class PageContextRequest(BaseModel):
+    image_b64: str | None = None
+    ocr_text: str = ""
+    manga_title: str = ""
 
 
 async def _tokenize(context_phrase: str, user_selection: str, char_offset=None) -> tuple[str, str]:
-    """Returns (part_of_speech, romaji_sentence). Returns ("unknown", "") on error."""
     try:
         res = await _http_client.post(DICT_TOKENIZE_URL, json={
             "context_phrase": context_phrase,
@@ -79,15 +91,58 @@ async def health():
     return {"status": "ok"}
 
 
+@app.post("/analyze-page-context")
+async def analyze_page_context(request: PageContextRequest):
+    """Describes a manga page using GPT-4.1-mini vision. Called once per page by Lua,
+    result is cached client-side and reused for all word lookups on that page."""
+    if not _oai_client:
+        raise HTTPException(status_code=503, detail="OpenAI not configured")
+
+    content: list = []
+    if request.image_b64:
+        content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{request.image_b64}",
+                "detail": "low",
+            }
+        })
+
+    prompt = ""
+    if request.manga_title:
+        prompt += f"Manga: {request.manga_title}\n"
+    if request.ocr_text:
+        prompt += f"Text on this page: {request.ocr_text}\n"
+    prompt += (
+        "Briefly describe the scene in English (under 80 words): "
+        "who is present, who is speaking to whom, their relationship, "
+        "the emotional tone, and any relevant action or setting."
+    )
+    content.append({"type": "text", "text": prompt})
+
+    try:
+        response = await _oai_client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": content}],
+            max_tokens=120,
+            temperature=0.2,
+        )
+        description = (response.choices[0].message.content or "").strip()
+        logger.info(f"[PAGE-CTX] {request.manga_title}: {description[:70]}")
+        return {"page_context": description}
+    except Exception as e:
+        logger.error(f"[PAGE-CTX-ERROR] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/analyze-translation-stream")
 async def analyze_translation_stream_ep(request: AnalyzeAiRequest):
-    """Streaming proxy: forwards /stream-translate from the translator service.
-    First chunk is \\x01{json_meta}\\x01\\n, then raw Spanish text tokens."""
     trans_payload = {
         "context_phrase": request.context_phrase,
         "target_word":    request.target_word,
         "original_word":  request.original_word,
         "part_of_speech": request.part_of_speech,
+        "page_context":   request.page_context,
     }
 
     async def generate():
@@ -105,14 +160,12 @@ async def analyze_translation_stream_ep(request: AnalyzeAiRequest):
 
 @app.post("/analyze-grammar-stream")
 async def analyze_grammar_stream_ep(request: AnalyzeAiRequest):
-    """Streaming proxy: yields SudachiPy romaji + model first as JSON (\\x01{...}\\x01\\n),
-    then proxies GPT grammar tokens. Tokenize runs inside the generator to avoid
-    blocking the ASGI handler slot during the ~50ms tokenize call."""
     grammar_payload = {
         "context_phrase": request.context_phrase,
         "target_word":    request.target_word,
         "original_word":  request.original_word,
         "part_of_speech": request.part_of_speech,
+        "page_context":   request.page_context,
     }
 
     async def generate():
@@ -133,7 +186,6 @@ async def analyze_grammar_stream_ep(request: AnalyzeAiRequest):
 
 @app.post("/analyze-dict")
 async def analyze_dict_only(request: LookUpAndTranslateRequest):
-    """Phase-1 proxy: just the dictionary lookup, no AI. Keeps Lua on port 8002 only."""
     dict_payload = {
         "context_phrase": request.raw_text,
         "user_selection": request.target_word,

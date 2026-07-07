@@ -1,12 +1,14 @@
 import os
 import re
 import json
-import httpx
 import logging
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from dotenv import load_dotenv
+from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from openai import AsyncOpenAI
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,28 +17,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger("YOMITSU-TRANSLATOR")
 
-OLLAMA_API_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
-MODEL_NAME = "hf.co/unsloth/Hy-MT2-7B-GGUF:UD-Q4_K_XL"
+MODEL = "gpt-4.1-mini"
+client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-logger.info(f"Iniciando servicio. Endpoint de Ollama configurado en: {OLLAMA_API_URL}")
-logger.info(f"Modelo LLM seleccionado: {MODEL_NAME}")
+app = FastAPI(title="Yomitsu Translator Service")
 
-_http_client: httpx.AsyncClient = None  # type: ignore[assignment]  # assigned by lifespan
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global _http_client
-    _http_client = httpx.AsyncClient(timeout=30.0)
-    yield
-    await _http_client.aclose()
-
-
-app = FastAPI(
-    title="Yomitsu Translator Service",
-    description="Local LLM interface for contextual Japanese-to-Spanish translations using Hy-MT2",
-    lifespan=lifespan,
-)
+SYSTEM_PROMPT = """\
+You are an expert Japanese-to-Spanish translator specializing in manga and anime.
+Translate naturally and concisely, preserving the character's voice, speech register,
+and personality (casual, rough, polite, childlike, archaic, etc.).
+Return ONLY the Spanish translation — no explanations, no notes, no alternatives."""
 
 
 def _extract_sentence(context: str, target_word: str, original_word: str = "") -> str:
@@ -52,94 +42,76 @@ def _extract_sentence(context: str, target_word: str, original_word: str = "") -
     return context.strip()
 
 
-def _build_prompt(sentence: str) -> str:
-    return (
-        f"<system>\n    You are an expert Japanese-to-Spanish translator. "
-        f"Translate naturally and concisely.\n    </system>\n"
-        f"    <user>\n    Translate this Japanese sentence to Spanish: {sentence}\n    </user>\n"
-        f"    <assistant>"
-    )
-
-
-_STOP_TOKENS = ["<user>", "</user>", "<system>", "</system>", "<assistant>", "\n\n\n"]
-
-
 class TranslationRequest(BaseModel):
     context_phrase: str
     target_word: str
     original_word: str = ""
     part_of_speech: str
+    page_context: str = ""
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": MODEL_NAME, "ollama_url": OLLAMA_API_URL}
+    return {"status": "ok", "model": MODEL}
 
 
 @app.post("/translate")
 async def translate_context(request: TranslationRequest):
-    logger.info("--- Nueva petición de traducción recibida ---")
-    logger.info(f"[ENDPOINT] Palabra objetivo: '{request.target_word}' ({request.part_of_speech})")
-
-    source_sentence = _extract_sentence(request.context_phrase, request.target_word, request.original_word)
-    logger.info(f"[ENDPOINT] Frase extraída: '{source_sentence}'")
-
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": _build_prompt(source_sentence),
-        "stream": False,
-        "options": {"temperature": 0.3, "stop": _STOP_TOKENS},
+    sentence = _extract_sentence(request.context_phrase, request.target_word, request.original_word)
+    user_msg = _build_user_msg(sentence, request.page_context)
+    logger.info(f"[TRANSLATE] '{request.target_word}' | ctx={bool(request.page_context)}")
+    response = await client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": user_msg},
+        ],
+        max_tokens=200,
+        temperature=0.3,
+    )
+    translation = (response.choices[0].message.content or "").strip()
+    return {
+        "translation_raw": translation,
+        "source_sentence": sentence,
+        "model_used": MODEL,
+        "status": "success",
     }
-
-    logger.info(f"[OLLAMA] Enviando prompt al modelo '{MODEL_NAME}'...")
-
-    try:
-        response = await _http_client.post(OLLAMA_API_URL, json=payload)
-        response.raise_for_status()
-
-        llm_output = response.json().get("response", "").strip()
-        logger.info("[OLLAMA] ¡Respuesta del LLM recibida con éxito!")
-        logger.info(f"[OLLAMA] Output crudo:\n---\n{llm_output}\n---")
-
-        return {
-            "translation_raw": llm_output,
-            "source_sentence": source_sentence,
-            "model_used": MODEL_NAME,
-            "status": "success"
-        }
-    except httpx.HTTPError as e:
-        logger.error(f"[OLLAMA] ERROR crítico de comunicación: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to communicate with Ollama: {str(e)}")
 
 
 @app.post("/stream-translate")
 async def stream_translate(request: TranslationRequest):
-    source_sentence = _extract_sentence(request.context_phrase, request.target_word, request.original_word)
-    logger.info(f"[TRANS-STREAM] '{request.target_word}'")
+    sentence = _extract_sentence(request.context_phrase, request.target_word, request.original_word)
+    user_msg = _build_user_msg(sentence, request.page_context)
+    logger.info(f"[TRANS-STREAM] '{request.target_word}' | page_ctx={bool(request.page_context)}")
 
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": _build_prompt(source_sentence),
-        "stream": True,
-        "options": {"temperature": 0.3, "stop": _STOP_TOKENS},
-    }
-
-    meta = json.dumps({"s": source_sentence, "m": MODEL_NAME}, ensure_ascii=False)
+    meta = json.dumps({"s": sentence, "m": MODEL}, ensure_ascii=False)
 
     async def generate():
         yield f"\x01{meta}\x01\n"
         try:
-            async with _http_client.stream("POST", OLLAMA_API_URL, json=payload) as resp:
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    try:
-                        text = json.loads(line).get("response", "")
-                        if text:
-                            yield text
-                    except Exception:
-                        pass
+            stream = await client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": user_msg},
+                ],
+                max_tokens=200,
+                temperature=0.3,
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
         except Exception as e:
             logger.error(f"[TRANS-STREAM] Error: {e}")
 
     return StreamingResponse(generate(), media_type="text/plain")
+
+
+def _build_user_msg(sentence: str, page_context: str) -> str:
+    msg = ""
+    if page_context:
+        msg += f"Other text on this manga page (for context):\n{page_context}\n\n"
+    msg += f"Translate this line to Spanish:\n「{sentence}」"
+    return msg

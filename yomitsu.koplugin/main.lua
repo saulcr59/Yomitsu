@@ -58,6 +58,76 @@ local _cache      = {}
 local _cache_keys = {}
 local CACHE_MAX   = 50
 
+-- Page context cache keyed by "cbz_path:page_no" → GPT scene description.
+-- Populated in background after first word per page; used for all subsequent lookups.
+local _page_ctx_cache = {}
+
+local function _page_key(scope)
+    local ui = scope and scope.ui
+    if not ui then return nil end
+    local doc = ui.document
+    if not doc or not doc.file then return nil end
+
+    -- Prefer MokuroReader's page counter (getCurrentPage() is unreliable on CBZ).
+    local pno
+    local mr = ui.mokuroreader
+    if not mr then
+        for _, v in pairs(ui) do
+            if type(v) == "table" and type(v.parser) == "table" then mr = v; break end
+        end
+    end
+    -- KOReader tracks current page in ReaderPaging for fixed-layout docs (CBZ, PDF).
+    if ui.paging and ui.paging.current_page then
+        pno = ui.paging.current_page
+    end
+    if not pno and ui.view and ui.view.state then
+        pno = ui.view.state.page
+    end
+    if not pno then return nil end
+    return doc.file .. ":" .. tostring(pno)
+end
+
+
+-- Returns all OCR text from the current mokuro page as a single string, or "".
+-- Data layout (from mokuroreader source):
+--   ui.mokuro.mokuro_data.pages[page_no].blocks[i].lines = {"text", ...}
+--   ui.mokuro.parser:getPageData(mokuro_data, page_no) handles index variants.
+local function _mokuro_page_text(scope)
+    local ui = scope and scope.ui
+    if not ui then return "" end
+    local mr = ui.mokuro
+    if not mr or not mr.mokuro_data then return "" end
+
+    local page_no = (ui.paging and ui.paging.current_page)
+        or (ui.view and ui.view.state and ui.view.state.page)
+        or 1
+
+    local page_data
+    if mr.parser and type(mr.parser.getPageData) == "function" then
+        local ok, pd = pcall(mr.parser.getPageData, mr.parser, mr.mokuro_data, page_no)
+        if ok and pd then page_data = pd end
+    end
+    if not page_data and mr.mokuro_data.pages then
+        page_data = mr.mokuro_data.pages[page_no]
+            or mr.mokuro_data.pages[tostring(page_no)]
+    end
+    if not page_data then return "" end
+
+    local texts = {}
+    for _, block in ipairs(page_data.blocks or {}) do
+        local parts = {}
+        for _, line in ipairs(block.lines or {}) do
+            local t = type(line) == "string" and line
+                or (type(line) == "table" and (line.text or "")) or ""
+            if t ~= "" then parts[#parts+1] = t end
+        end
+        local bt = (#parts > 0) and table.concat(parts, "")
+            or (type(block.text) == "string" and block.text) or ""
+        if bt ~= "" then texts[#texts+1] = bt end
+    end
+    return table.concat(texts, " | ")
+end
+
 local function _cache_get(key)
     return _cache[key]
 end
@@ -581,8 +651,8 @@ local function async_post_to(host, port, path, payload, my_id, timeout_secs, on_
 
     local function step()
         if done then return end
-        if my_id ~= _search_id then finish(nil, nil); return end
-        if os.time() > deadline  then finish(nil, nil); return end
+        if my_id ~= nil and my_id ~= _search_id then finish(nil, nil); return end
+        if os.time() > deadline then finish(nil, nil); return end
         if sent < #request then
             local n, e, m = tcp:send(request:sub(sent + 1))
             if n then sent = sent + n
@@ -1073,12 +1143,24 @@ local function yomitsuInterceptor(scope, text, ...)
         hook_close(viewer)
         UIManager:show(viewer)
 
+        -- Cache raw OCR text per page (synchronous — available on first word too).
+        local cur_page_key = _page_key(scope)
+        if cur_page_key and not _page_ctx_cache[cur_page_key] then
+            local ok_ocr, ocr_text = pcall(_mokuro_page_text, scope)
+            if ok_ocr and type(ocr_text) == "string" and ocr_text ~= "" then
+                _page_ctx_cache[cur_page_key] = ocr_text
+                logger.info("[YOMITSU] OCR página cacheado: " .. #ocr_text .. " chars")
+            end
+        end
+        local page_ctx = (cur_page_key and _page_ctx_cache[cur_page_key]) or ""
+
         -- Shared payload for both streaming requests
         local ok_ai, ai_payload = pcall(json.encode, {
             context_phrase = context,
             target_word    = word,
             original_word  = original_word,
             part_of_speech = pos,
+            page_context   = page_ctx,
         })
         if not ok_ai or not ai_payload then return end
 

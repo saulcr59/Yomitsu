@@ -12,9 +12,7 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434/api/generate}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     restart: unless-stopped
 
   grammar:
@@ -33,6 +31,7 @@ services:
       - DICT_URL=http://dictionary:8000
       - TRANSLATOR_URL=http://translator:8001
       - GRAMMAR_URL=http://grammar:8003
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       - dictionary
       - translator

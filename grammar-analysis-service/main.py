@@ -90,8 +90,11 @@ def _extract_sentence(context: str, target_word: str, original_word: str = "") -
     return context.strip()
 
 
-def _build_messages(sentence: str, target_word: str, part_of_speech: str) -> list:
-    user_prompt = (
+def _build_messages(sentence: str, target_word: str, part_of_speech: str, page_context: str = "") -> list:
+    user_prompt = ""
+    if page_context:
+        user_prompt += f"Other text on this manga page (for context):\n{page_context}\n\n"
+    user_prompt += (
         f"Sentence: 「{sentence}」\n"
         f"Target word: 「{target_word}」({part_of_speech})\n\n"
         "Analyze this sentence following the system schema."
@@ -107,6 +110,7 @@ class GrammarRequest(BaseModel):
     target_word: str
     original_word: str = ""
     part_of_speech: str
+    page_context: str = ""
 
 
 @app.get("/health")
@@ -122,7 +126,7 @@ async def analyze_grammar(request: GrammarRequest):
     try:
         response = await client.chat.completions.create(
             model=MODEL,
-            messages=_build_messages(sentence, request.target_word, request.part_of_speech),
+            messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context),
             max_tokens=1000,
             temperature=0.3,
         )
@@ -157,7 +161,7 @@ async def stream_grammar(request: GrammarRequest):
         try:
             response = await client.chat.completions.create(
                 model=MODEL,
-                messages=_build_messages(sentence, request.target_word, request.part_of_speech),
+                messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context),
                 max_tokens=1000,
                 temperature=0.3,
                 stream=True,
