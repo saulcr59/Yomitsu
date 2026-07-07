@@ -1,25 +1,32 @@
-## 🛠️ Dictionary Service Setup
+# Dictionary Service
 
-Follow these steps to initialize and run the Japanese dictionary microservice on your Mac.
+Tokenizes Japanese text with SudachiPy (Mode C normalization) and looks up the normalized form in Jitendex (Yomitan JSON format) and Kenkyusha (MDX). Both dictionaries are loaded entirely into memory at startup.
 
-### 1. Environment Initialization
+## Endpoints
 
-Open your Mac Terminal and run the following commands:
+- `POST /extract-word` — full dictionary lookup, returns XHTML entries
+- `POST /tokenize` — tokenize only, returns part of speech and romaji
+- `GET /health`
 
-# Move into the dictionary service directory
-cd PATH/to/dictionary-service
+## Setup
 
-# Create the Python virtual environment
+```bash
 python3 -m venv venv
-
-# Activate the virtual environment
 source venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
 
-# Upgrade pip to the latest version
-pip install --upgrade pip
+Or via Docker Compose from the repo root (recommended).
 
-# Install required dependencies (FastAPI & Sudachi Rust)
-pip install fastapi uvicorn sudachipy sudachidict_core
+## Dictionary files
 
-# Freeze dependencies for future Docker integration
-pip freeze > requirements.txt
+Place files at:
+
+```
+dictionaries/
+├── jitendex-yomitan/
+│   └── term_bank_*.json
+└── 研究社和英大辞典/
+    └── 研究社新和英大辞典.mdx
+```

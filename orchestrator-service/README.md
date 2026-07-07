@@ -1,18 +1,25 @@
-# 1. Crear y entrar en la carpeta
-cd PATH/to/orchestrator-service
+# Orchestrator Service
 
-# 2. Crear entorno virtual (Aísla las librerías de este servicio)
+Central entry point for the KOReader plugin. Receives lookup requests and fans out concurrently to the dictionary service, translator service, and grammar analysis service, then merges the results.
+
+## Endpoints
+
+- `POST /analyze-dict` — dictionary lookup (proxies to dictionary-service)
+- `POST /analyze-translation-stream` — streaming translation (proxies to translator-service)
+- `POST /analyze-grammar-stream` — streaming grammar breakdown (proxies to grammar-analysis-service)
+- `GET /health`
+
+## Setup
+
+```bash
 python3 -m venv venv
-
-# 3. Activar el entorno
 source venv/bin/activate
+pip install -r requirements.txt
+export OPENAI_API_KEY=sk-...
+uvicorn main:app --host 0.0.0.0 --port 8002
+```
 
-# 4. Actualizar herramientas base
-pip install --upgrade pip
+Or via Docker Compose from the repo root (recommended).
 
-# 5. Instalar las dependencias específicas de este servicio
-# (Para el orquestador solo necesitamos FastAPI, Uvicorn y HTTPX)
-pip install fastapi uvicorn httpx
-
-# 6. Guardar la configuración para el futuro (Docker)
-pip freeze > requirements.txt
+Service URLs default to `localhost` and can be overridden with environment variables:
+`DICT_URL`, `TRANSLATOR_URL`, `GRAMMAR_URL`.

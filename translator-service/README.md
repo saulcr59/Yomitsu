@@ -1,25 +1,21 @@
-## 🛠️ Translator Service Setup
+# Translator Service
 
-Follow these steps to initialize and run the translation microservice on your Mac.
+Translates Japanese sentences to Spanish using GPT-4.1-mini. Accepts the sentence to translate, the target word, its part of speech, and optional manga page OCR context for better accuracy.
 
-### 1. Environment Initialization
+## Endpoints
 
-Open your Mac Terminal and run the following commands:
+- `POST /translate` — single translation response
+- `POST /stream-translate` — streaming response (used by the plugin)
+- `GET /health`
 
-# Move into the translator service directory
-cd PATH/to/translator-service
+## Setup
 
-# Create the Python virtual environment
+```bash
 python3 -m venv venv
-
-# Activate the virtual environment
 source venv/bin/activate
+pip install -r requirements.txt
+export OPENAI_API_KEY=sk-...
+uvicorn main:app --host 0.0.0.0 --port 8001
+```
 
-# Upgrade pip to the latest version
-pip install --upgrade pip
-
-# Install required dependencies (FastAPI, HTTPX, and Pydantic)
-pip install fastapi uvicorn httpx pydantic
-
-# Freeze dependencies for future Docker integration
-pip freeze > requirements.txt
+Or via Docker Compose from the repo root (recommended).
