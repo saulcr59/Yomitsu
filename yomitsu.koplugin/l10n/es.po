@@ -1,0 +1,112 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "very common"
+msgstr "muy común"
+
+msgid "common"
+msgstr "común"
+
+msgid "uncommon"
+msgstr "poco común"
+
+msgid "rare"
+msgstr "raro"
+
+msgid "No history yet."
+msgstr "Sin historial todavía."
+
+msgid "Translating and analyzing..."
+msgstr "Traduciendo y analizando..."
+
+msgid "No analysis available"
+msgstr "Sin análisis disponible"
+
+msgid "Generating romaji and breakdown..."
+msgstr "Generando romaji y desglose..."
+
+msgid "unknown"
+msgstr "desconocido"
+
+msgid "No translation."
+msgstr "Sin traducción."
+
+msgid "Analysis unavailable."
+msgstr "Análisis no disponible."
+
+msgid "Yomitsu: Analyzing."
+msgstr "Yomitsu: Analizando."
+
+msgid "Yomitsu: Analyzing.."
+msgstr "Yomitsu: Analizando.."
+
+msgid "Yomitsu: Analyzing..."
+msgstr "Yomitsu: Analizando..."
+
+msgid "Yomitsu AI"
+msgstr "Yomitsu IA"
+
+msgid "History"
+msgstr "Historial"
+
+msgid "Dictionary"
+msgstr "Diccionario"
+
+msgid "No definition found."
+msgstr "No se encontró definición."
+
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgid "Save"
+msgstr "Guardar"
+
+msgid "Connection OK (%ds)\n%s:%s"
+msgstr "Conexión OK (%ds)\n%s:%s"
+
+msgid "No response (%s)\n%s:%s"
+msgstr "Sin respuesta (%s)\n%s:%s"
+
+msgid "↑ Move up"
+msgstr "↑ Subir"
+
+msgid "↓ Move down"
+msgstr "↓ Bajar"
+
+msgid "Close"
+msgstr "Cerrar"
+
+msgid "Hold a dictionary entry to reorder"
+msgstr "Mantén pulsado un diccionario para reordenar"
+
+msgid "Server: "
+msgstr "Servidor: "
+
+msgid "Secondary server: "
+msgstr "Servidor secundario: "
+
+msgid "not configured"
+msgstr "no configurado"
+
+msgid "Home server (host:port)"
+msgstr "Servidor casa (host:puerto)"
+
+msgid "Away server (host:port)"
+msgstr "Servidor fuera (host:puerto)"
+
+msgid "Use secondary server"
+msgstr "Usar servidor secundario"
+
+msgid "Test connection"
+msgstr "Test de conexión"
+
+msgid "  └ Translation"
+msgstr "  └ Traducción"
+
+msgid "  └ Grammar breakdown"
+msgstr "  └ Desglose"
+
+msgid "Dictionaries"
+msgstr "Diccionarios"

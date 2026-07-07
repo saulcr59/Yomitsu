@@ -9,6 +9,7 @@ local Device           = require("device")
 local json             = require("json")
 local logger           = require("logger")
 local DataStorage      = require("datastorage")
+local _                = require("gettext")
 local Screen = Device.screen
 
 local Yomitsu = WidgetContainer:extend{ name = "yomitsu", is_doc_only = true }
@@ -239,7 +240,7 @@ end
 local function buildHistoryHtml(current_word)
     local hist = load_history()
     if #hist == 0 then
-        return _XHTML_HEAD .. '<p>Sin historial todavía.</p>' .. _XHTML_TAIL
+        return _XHTML_HEAD .. '<p>' .. _("No history yet.") .. '</p>' .. _XHTML_TAIL
     end
     local lines = {}
     for _, entry in ipairs(hist) do
@@ -333,16 +334,16 @@ local DEBOUNCE_SECS = 3   -- seconds to ignore the same word after showing a res
 
 -- Frequency tier labels (module-level so buildLoadingHtml and buildAiHtml both use them)
 local function _freq_label_jpdb(n)
-    if n <= 1500  then return "muy común"
-    elseif n <= 5000  then return "común"
-    elseif n <= 10000 then return "poco común"
-    else return "raro" end
+    if n <= 1500  then return _("very common")
+    elseif n <= 5000  then return _("common")
+    elseif n <= 10000 then return _("uncommon")
+    else return _("rare") end
 end
 local function _freq_label_bccwj(n)
-    if n <= 3000  then return "muy común"
-    elseif n <= 8000  then return "común"
-    elseif n <= 15000 then return "poco común"
-    else return "raro" end
+    if n <= 3000  then return _("very common")
+    elseif n <= 8000  then return _("common")
+    elseif n <= 15000 then return _("uncommon")
+    else return _("rare") end
 end
 
 local function hasJapanese(text)
@@ -854,7 +855,7 @@ local function buildLoadingHtml(word, reading, frequency, count, kanji)
         .. _build_kanji_html(kanji)
         .. '<hr/>\n'
         .. '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.4em 0">'
-        .. '<font color="gray">Traduciendo y analizando...</font></p>'
+        .. '<font color="gray">' .. _("Translating and analyzing...") .. '</font></p>'
     return _XHTML_HEAD .. body .. _XHTML_TAIL
 end
 
@@ -867,7 +868,7 @@ local function buildTranslationHtml(word, reading, ai, original_word, frequency,
     local freq_str = _build_freq_str(frequency)
 
     local source = ai.source_sentence or ""
-    local translation = (ai.translation_and_nuance or "Sin análisis disponible")
+    local translation = (ai.translation_and_nuance or _("No analysis available"))
         :gsub("^%s+", ""):gsub("%s+$", "")
     translation = _html_esc(translation):gsub("\n", "<br/>")
 
@@ -900,7 +901,7 @@ local function buildTranslationHtml(word, reading, ai, original_word, frequency,
         block[#block+1] = '<hr/>'
         block[#block+1] =
             '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.3em 0">'
-            .. '<font color="#aaa"><i>Generando romaji y desglose...</i></font></p>'
+            .. '<font color="#aaa"><i>' .. _("Generating romaji and breakdown...") .. '</i></font></p>'
     end
 
     local body = '<p><b>' .. _html_esc(word) .. '</b>' .. reading_str .. freq_str .. _count_badge(count) .. '</p>\n'
@@ -908,7 +909,7 @@ local function buildTranslationHtml(word, reading, ai, original_word, frequency,
         .. '<hr/>\n'
         .. table.concat(block, "\n") .. "\n"
         .. '<p style="margin-top:0.3em"><font color="gray"><small>'
-        .. _html_esc(ai.model_used or "desconocido")
+        .. _html_esc(ai.model_used or _("unknown"))
         .. '</small></font></p>'
 
     return _XHTML_HEAD .. body .. _XHTML_TAIL
@@ -930,7 +931,7 @@ local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original
     -- Translation block
     if not opts.hide_translation then
         local source = ai.source_sentence or ""
-        local translation = (ai.translation_and_nuance or "Sin análisis disponible")
+        local translation = (ai.translation_and_nuance or _("No analysis available"))
             :gsub("^%s+", ""):gsub("%s+$", "")
         translation = _html_esc(translation):gsub("\n", "<br/>")
 
@@ -963,7 +964,7 @@ local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original
 
         body = body
             .. '<p style="margin-top:0.3em"><font color="gray"><small>'
-            .. _html_esc(ai.model_used or "desconocido")
+            .. _html_esc(ai.model_used or _("unknown"))
             .. '</small></font></p>'
     end
 
@@ -1029,9 +1030,9 @@ local function yomitsuInterceptor(scope, text, ...)
     local anim_done   = false
     local _anim_step  = 0
     local _anim_texts = {
-        "Yomitsu: Analizando.",
-        "Yomitsu: Analizando..",
-        "Yomitsu: Analizando...",
+        _("Yomitsu: Analyzing."),
+        _("Yomitsu: Analyzing.."),
+        _("Yomitsu: Analyzing..."),
     }
 
     local function make_loading_box(txt)
@@ -1098,7 +1099,7 @@ local function yomitsuInterceptor(scope, text, ...)
         -- Yomitsu IA tab (position 1, updated in-place by streams)
         if show_ia then
             table.insert(results, {
-                dict       = "Yomitsu IA",
+                dict       = _("Yomitsu AI"),
                 word       = word,
                 definition = buildLoadingHtml(word, reading, frequency, lookup_count, kanji),
                 is_html    = true,
@@ -1124,15 +1125,15 @@ local function yomitsuInterceptor(scope, text, ...)
 
         if not show_ia and dict_count == 0 then
             table.insert(results, {
-                dict       = "Diccionario",
+                dict       = _("Dictionary"),
                 word       = word,
-                definition = "<p>No se encontró definición.</p>",
+                definition = "<p>" .. _("No definition found.") .. "</p>",
                 is_html    = true,
             })
         end
 
         table.insert(results, {
-            dict       = "Historial",
+            dict       = _("History"),
             word       = word,
             definition = buildHistoryHtml(word),
             is_html    = true,
@@ -1237,7 +1238,7 @@ local function yomitsuInterceptor(scope, text, ...)
 
         local function on_trans_done(success)
             if my_id ~= _search_id then return end
-            if trans_buf == "" then trans_buf = "Sin traducción." end
+            if trans_buf == "" then trans_buf = _("No translation.") end
             local ai = {
                 translation_and_nuance = trans_buf,
                 source_sentence        = trans_source,
@@ -1279,7 +1280,7 @@ local function yomitsuInterceptor(scope, text, ...)
         local function on_gram_done(success)
             if my_id ~= _search_id then return end
             if not success and gram_buf == "" then
-                gram_buf = "Análisis no disponible."
+                gram_buf = _("Analysis unavailable.")
             end
             -- GPT embeds a ROMAJI section in the body; prefer it over the SudachiPy fallback.
             local rom = gram_buf:match("\nROMAJI:%s*\n(.-)%s*$")
@@ -1452,12 +1453,12 @@ function Yomitsu:_showUrlDialog(title, current_host, current_port, hint, on_save
         input_hint = hint or "192.168.0.120:8002",
         buttons    = {{
             {
-                text = "Cancelar",
+                text = _("Cancel"),
                 id   = "close",
                 callback = function() UIManager:close(dialog) end,
             },
             {
-                text             = "Guardar",
+                text             = _("Save"),
                 is_enter_default = true,
                 callback = function()
                     local host, port = _parse_host_port(dialog:getInputText())
@@ -1482,9 +1483,9 @@ function Yomitsu:_testConnection()
     local elapsed = os.time() - t0
     local msg
     if body and code == 200 then
-        msg = "Conexion OK (" .. elapsed .. "s)\n" .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT)
+        msg = string.format(_("Connection OK (%ds)\n%s:%s"), elapsed, _ORCH_HOST, tostring(_ORCH_PORT))
     else
-        msg = "Sin respuesta (" .. tostring(code or "error") .. ")\n" .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT)
+        msg = string.format(_("No response (%s)\n%s:%s"), tostring(code or "error"), _ORCH_HOST, tostring(_ORCH_PORT))
     end
     UIManager:show(InfoMessage:new{ text = msg, timeout = 5 })
 end
@@ -1564,9 +1565,9 @@ function Yomitsu:addToMainMenu(menu_items)
                     local dialog
                     dialog = ButtonDialog:new{
                         buttons = {
-                            {{ text = "↑ Subir", callback = function() do_move(-1) end }},
-                            {{ text = "↓ Bajar", callback = function() do_move( 1) end }},
-                            {{ text = "Cerrar",  callback = function() UIManager:close(dialog) end }},
+                            {{ text = _("↑ Move up"),  callback = function() do_move(-1) end }},
+                            {{ text = _("↓ Move down"), callback = function() do_move( 1) end }},
+                            {{ text = _("Close"),       callback = function() UIManager:close(dialog) end }},
                         },
                     }
                     UIManager:show(dialog)
@@ -1577,7 +1578,7 @@ function Yomitsu:addToMainMenu(menu_items)
         -- Hint line at the bottom (non-interactive, grayed out)
         if #items > 0 then
             items[#items+1] = {
-                text = "Mantén pulsado un diccionario para reordenar",
+                text = _("Hold a dictionary entry to reorder"),
                 enabled_func = function() return false end,
             }
         end
@@ -1589,12 +1590,12 @@ function Yomitsu:addToMainMenu(menu_items)
         sub_item_table = {
             {
                 text_func = function()
-                    return "Servidor: " .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT)
+                    return _("Server: ") .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT)
                 end,
                 keep_menu_open = true,
                 callback = function(tmi)
                     self:_showUrlDialog(
-                        "Servidor casa (host:puerto)",
+                        _("Home server (host:port)"),
                         _ORCH_HOST, _ORCH_PORT,
                         "192.168.0.120:8002",
                         function(host, port)
@@ -1607,13 +1608,13 @@ function Yomitsu:addToMainMenu(menu_items)
             },
             {
                 text_func = function()
-                    local h = _ORCH_HOST_AWAY ~= "" and _ORCH_HOST_AWAY or "no configurado"
-                    return "Servidor secundario: " .. h .. ":" .. tostring(_ORCH_PORT_AWAY)
+                    local h = _ORCH_HOST_AWAY ~= "" and _ORCH_HOST_AWAY or _("not configured")
+                    return _("Secondary server: ") .. h .. ":" .. tostring(_ORCH_PORT_AWAY)
                 end,
                 keep_menu_open = true,
                 callback = function(tmi)
                     self:_showUrlDialog(
-                        "Servidor fuera (host:puerto)",
+                        _("Away server (host:port)"),
                         _ORCH_HOST_AWAY, _ORCH_PORT_AWAY,
                         "example.ddns.net:8002",
                         function(host, port)
@@ -1626,7 +1627,7 @@ function Yomitsu:addToMainMenu(menu_items)
             },
             {
                 text_func = function()
-                    return "Usar servidor secundario"
+                    return _("Use secondary server")
                 end,
                 checked_func = function() return _ORCH_USE_AWAY end,
                 callback = function(tmi)
@@ -1641,28 +1642,28 @@ function Yomitsu:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = "Test de conexion",
+                text = _("Test connection"),
                 callback = function() self:_testConnection() end,
             },
             {
-                text = "Yomitsu IA",
+                text = _("Yomitsu AI"),
                 checked_func = function() return _cfg_bool("yomitsu_show_ia", true) end,
                 callback = function(tmi) toggle("yomitsu_show_ia", true, tmi) end,
             },
             {
-                text = "  └ Traducción",
+                text = _("  └ Translation"),
                 checked_func = function() return _cfg_bool("yomitsu_show_translation", true) end,
                 enabled_func = function() return _cfg_bool("yomitsu_show_ia", true) end,
                 callback = function(tmi) toggle("yomitsu_show_translation", true, tmi) end,
             },
             {
-                text = "  └ Desglose",
+                text = _("  └ Grammar breakdown"),
                 checked_func = function() return _cfg_bool("yomitsu_show_grammar", true) end,
                 enabled_func = function() return _cfg_bool("yomitsu_show_ia", true) end,
                 callback = function(tmi) toggle("yomitsu_show_grammar", true, tmi) end,
             },
             {
-                text = "Diccionarios",
+                text = _("Dictionaries"),
                 sub_item_table_func = dict_sub_items,
             },
         },
