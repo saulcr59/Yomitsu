@@ -183,141 +183,151 @@ local function _ref_verbs()
     if _ref_verbs_cache then return _ref_verbs_cache end
     local L = _
     local h = _REF_HEAD
+    -- grey helper for romaji
+    local function r(t) return '<font color="#888">' .. t .. '</font>' end
 
-    local function vform(jp, en, use, u_rule, u_detail, u_ex, ru_rule, ru_ex, irr, note)
-        h = h .. '<h3>' .. jp .. ' — ' .. en .. '</h3>'
+    local function vform(jp, romaji, en, use, u_rule, u_changes, u_ex, ru_rule, ru_ex, irr, note)
+        h = h .. '<h3>' .. jp .. ' ' .. r(romaji) .. ' — ' .. en .. '</h3>'
         h = h .. '<p style="margin-left:0.5em;color:#444"><i>' .. L("Use") .. ': ' .. use .. '</i></p>'
-        h = h .. '<p style="margin-left:0.5em"><b>五段:</b> ' .. u_rule .. '</p>'
-        if u_detail then h = h .. '<p style="margin-left:1.2em;color:#666">' .. u_detail .. '</p>' end
+        h = h .. '<p style="margin-left:0.5em"><b>五段</b> ' .. r('(godan)') .. ': ' .. u_rule .. '</p>'
+        if u_changes then h = h .. '<p style="margin-left:1.2em;color:#666">' .. u_changes .. '</p>' end
         h = h .. '<p style="margin-left:1.2em">' .. u_ex .. '</p>'
-        h = h .. '<p style="margin-left:0.5em"><b>一段:</b> ' .. ru_rule .. '</p>'
+        h = h .. '<p style="margin-left:0.5em"><b>一段</b> ' .. r('(ichidan)') .. ': ' .. ru_rule .. '</p>'
         h = h .. '<p style="margin-left:1.2em">' .. ru_ex .. '</p>'
         h = h .. '<p style="margin-left:0.5em"><b>' .. L("Irregular") .. ':</b> ' .. irr .. '</p>'
         if note then h = h .. '<p style="margin-left:0.5em;color:#555"><i>' .. note .. '</i></p>' end
         h = h .. '<hr/>'
     end
 
-    h = h .. '<h2>動詞 · ' .. L("Verbs") .. '</h2>'
+    h = h .. '<h2>動詞 ' .. r('(dōshi)') .. ' · ' .. L("Verbs") .. '</h2>'
 
+    -- Verb types
     h = h .. '<h3>' .. L("Verb types") .. '</h3>'
-    h = h .. '<p><b>五段</b> (u-verbs) — ' .. L("ends in: く・ぐ・す・つ・ぬ・ぶ・む・う, or る with あ/う/お before") .. '</p>'
-    h = h .. '<p style="margin-left:1em;color:#555">書く・話す・飲む・買う・切る</p>'
-    h = h .. '<p><b>一段</b> (ru-verbs) — ' .. L("ends in る with い/え before") .. '</p>'
-    h = h .. '<p style="margin-left:1em;color:#555">食べる・見る・起きる・教える</p>'
-    h = h .. '<p><b>不規則</b> (irregular) — ' .. L("only two verbs") .. ': する・くる</p>'
-    h = h .. '<p style="margin-left:1em;color:#666"><i>⚠ ' .. L("Same sound, different type") .. ': 切る (kiru) = 五段 / 着る (kiru) = 一段</i></p>'
+    h = h .. '<p><b>五段</b> ' .. r('(godan)') .. ' — ' .. L("ends in: く, ぐ, す, つ, ぬ, ぶ, む, う, or る with a/u/o before") .. '</p>'
+    h = h .. '<p style="margin-left:1em;color:#555">書く ' .. r('(kaku)') .. ', 話す ' .. r('(hanasu)') .. ', 飲む ' .. r('(nomu)') .. ', 買う ' .. r('(kau)') .. ', 切る ' .. r('(kiru)') .. '</p>'
+    h = h .. '<p><b>一段</b> ' .. r('(ichidan)') .. ' — ' .. L("ends in る with i/e before") .. '</p>'
+    h = h .. '<p style="margin-left:1em;color:#555">食べる ' .. r('(taberu)') .. ', 見る ' .. r('(miru)') .. ', 起きる ' .. r('(okiru)') .. ', 教える ' .. r('(oshieru)') .. '</p>'
+    h = h .. '<p><b>不規則</b> ' .. r('(fukisoku)') .. ' — ' .. L("only two verbs") .. ': する ' .. r('(suru)') .. ', くる ' .. r('(kuru)') .. '</p>'
+    h = h .. '<p style="margin-left:1em;color:#666"><i>⚠ ' .. L("Same sound, different type") .. ': 切る ' .. r('(kiru)') .. ' = 五段 / 着る ' .. r('(kiru)') .. ' = 一段</i></p>'
     h = h .. '<hr/>'
 
-    vform('ない形', L("Negative"),
+    local function ex(j1, r1, j2, r2) return j1 .. r('('..r1..')') .. '→<b>' .. j2 .. '</b>' .. r('('..r2..')') end
+
+    vform('ない形', '(nai-kei)', L("Negative"),
         L("negate an action: 'do not / does not do X'"),
-        L("change vowel to あ-row + ない"),
-        'く→か・ぐ→が・す→さ・つ→た・う→わ・む→ま・る→ら',
-        '書く→<b>書かない</b>  買う→<b>買わない</b>  話す→<b>話さない</b>',
+        L("change final vowel to あ-row + ない"),
+        'ku→ka, gu→ga, su→sa, tsu→ta, u→wa, mu→ma, ru→ra',
+        ex('書く','kaku','書かない','kakanai') .. '  ' .. ex('買う','kau','買わない','kawanai'),
         L("remove る + ない"),
-        '食べる→<b>食べない</b>  見る→<b>見ない</b>',
-        'する→<b>しない</b>  くる→<b>こない</b>',
-        L("Past negative: ない→なかった") .. '  書かなかった / 食べなかった')
+        ex('食べる','taberu','食べない','tabenai') .. '  ' .. ex('見る','miru','見ない','minai'),
+        ex('する','suru','しない','shinai') .. '  ' .. ex('くる','kuru','こない','konai'),
+        L("Past negative: ない→なかった") .. ': 書かなかった ' .. r('(kakanakatta)'))
 
-    vform('た形', L("Past tense"),
+    vform('た形', '(ta-kei)', L("Past tense"),
         L("past actions and events: 'did X / X happened'"),
-        L("same stem as て-form, て→た / で→だ"),
-        'く→いた・ぐ→いだ・す→した・つ/う/る→った・ぬ/ぶ/む→んだ',
-        '書く→<b>書いた</b>  飲む→<b>飲んだ</b>  話す→<b>話した</b>',
+        L("same pattern as て-form: て→た, で→だ"),
+        'ku→ita, gu→ida, su→shita, tsu/u/ru→tta, nu/bu/mu→nda',
+        ex('書く','kaku','書いた','kaita') .. '  ' .. ex('飲む','nomu','飲んだ','nonda'),
         L("remove る + た"),
-        '食べる→<b>食べた</b>  見る→<b>見た</b>',
-        'する→<b>した</b>  くる→<b>きた</b>',
-        '※ ' .. L("Exception") .. ': 行く→<b>行った</b> (' .. L("not") .. ' 行いた)')
+        ex('食べる','taberu','食べた','tabeta') .. '  ' .. ex('見る','miru','見た','mita'),
+        ex('する','suru','した','shita') .. '  ' .. ex('くる','kuru','きた','kita'),
+        '※ ' .. L("Exception") .. ': 行く ' .. r('(iku)') .. '→行った ' .. r('(itta)'))
 
-    vform('て形', L("Te-form"),
+    vform('て形', '(te-kei)', L("Te-form"),
         L("connect actions; requests (〜てください); ongoing (〜ている); permission (〜てもいい)"),
-        L("く→いて・ぐ→いで・す→して・つ/う/る→って・ぬ/ぶ/む→んで"),
+        L("ku→ite, gu→ide, su→shite, tsu/u/ru→tte, nu/bu/mu→nde"),
         nil,
-        '書く→<b>書いて</b>  買う→<b>買って</b>  飲む→<b>飲んで</b>',
+        ex('書く','kaku','書いて','kaite') .. '  ' .. ex('買う','kau','買って','katte') .. '  ' .. ex('飲む','nomu','飲んで','nonde'),
         L("remove る + て"),
-        '食べる→<b>食べて</b>  見る→<b>見て</b>',
-        'する→<b>して</b>  くる→<b>きて</b>',
-        '※ ' .. L("Exception") .. ': 行く→<b>行って</b>')
+        ex('食べる','taberu','食べて','tabete') .. '  ' .. ex('見る','miru','見て','mite'),
+        ex('する','suru','して','shite') .. '  ' .. ex('くる','kuru','きて','kite'),
+        '※ ' .. L("Exception") .. ': 行く ' .. r('(iku)') .. '→行って ' .. r('(itte)'))
 
-    vform('ます形', L("Polite form"),
-        L("formal register (teachers, strangers, work). Stem used in: 〜たい / 〜やすい / 〜にくい"),
+    vform('ます形', '(masu-kei)', L("Polite form"),
+        L("formal register (teachers, strangers, work). Stem used in: 〜たい, 〜やすい, 〜にくい"),
         L("change to い-row + ます"),
-        'く→き・ぐ→ぎ・す→し・つ→ち・む→み・る→り・う→い',
-        '書く→<b>書きます</b>  飲む→<b>飲みます</b>  買う→<b>買います</b>',
+        'ku→ki, gu→gi, su→shi, tsu→chi, mu→mi, ru→ri, u→i',
+        ex('書く','kaku','書きます','kakimasu') .. '  ' .. ex('飲む','nomu','飲みます','nomimasu'),
         L("remove る + ます"),
-        '食べる→<b>食べます</b>  見る→<b>見ます</b>',
-        'する→<b>します</b>  くる→<b>きます</b>',
+        ex('食べる','taberu','食べます','tabemasu') .. '  ' .. ex('見る','miru','見ます','mimasu'),
+        ex('する','suru','します','shimasu') .. '  ' .. ex('くる','kuru','きます','kimasu'),
         nil)
 
-    vform('〜たい', L("Want to do"),
+    vform('〜たい', '(~tai)', L("Want to do"),
         L("express desire to do something. Conjugates like an い-adjective"),
         L("ます-stem + たい"),
         nil,
-        '書く→<b>書きたい</b>  飲む→<b>飲みたい</b>',
+        ex('書く','kaku','書きたい','kakitai') .. '  ' .. ex('飲む','nomu','飲みたい','nomitai'),
         L("remove る + たい"),
-        '食べる→<b>食べたい</b>  見る→<b>見たい</b>',
-        'する→<b>したい</b>  くる→<b>きたい</b>',
+        ex('食べる','taberu','食べたい','tabetai') .. '  ' .. ex('見る','miru','見たい','mitai'),
+        ex('する','suru','したい','shitai') .. '  ' .. ex('くる','kuru','きたい','kitai'),
         L("Past: たかった  Neg: たくない  Past neg: たくなかった"))
 
-    vform('可能形', L("Potential"),
+    vform('可能形', '(kanō-kei)', L("Potential"),
         L("can / be able to do X. Object often uses が instead of を"),
         L("change to え-row + る"),
         nil,
-        '書く→<b>書ける</b>  読む→<b>読める</b>  買う→<b>買える</b>',
-        L("remove る + られる") .. '  (' .. L("casual") .. ': れる — ら抜き言葉)',
-        '食べる→<b>食べられる</b>  見る→<b>見られる</b>',
-        'する→<b>できる</b>  くる→<b>こられる</b>',
+        ex('書く','kaku','書ける','kakeru') .. '  ' .. ex('読む','yomu','読める','yomeru') .. '  ' .. ex('買う','kau','買える','kaeru'),
+        L("remove る + られる") .. '  ' .. r('(casual: れる — ra-nuki)'),
+        ex('食べる','taberu','食べられる','taberareru') .. '  ' .. ex('見る','miru','見られる','mirareru'),
+        ex('する','suru','できる','dekiru') .. '  ' .. ex('くる','kuru','こられる','korareru'),
         nil)
 
-    vform('受身形', L("Passive"),
-        L("(1) passive voice: 'X is done'. (2) nuisance: something happened to subject (迷惑の受身)"),
+    vform('受身形', '(ukemi-kei)', L("Passive"),
+        L("(1) passive voice: 'X is done'. (2) nuisance passive (迷惑の受身): something happened to subject"),
         L("negative stem + れる"),
         nil,
-        '書く→<b>書かれる</b>  飲む→<b>飲まれる</b>',
+        ex('書く','kaku','書かれる','kakareru') .. '  ' .. ex('飲む','nomu','飲まれる','nomareru'),
         L("remove る + られる"),
-        '食べる→<b>食べられる</b>  見る→<b>見られる</b>',
-        'する→<b>される</b>  くる→<b>こられる</b>',
-        L("Example") .. ': 雨に降られた = "I got rained on"')
+        ex('食べる','taberu','食べられる','taberareru') .. '  ' .. ex('見る','miru','見られる','mirareru'),
+        ex('する','suru','される','sareru') .. '  ' .. ex('くる','kuru','こられる','korareru'),
+        L("Example") .. ': 雨に降られた ' .. r('(ame ni furareta)') .. ' = "I got rained on"')
 
-    vform('使役形', L("Causative"),
+    vform('使役形', '(shieki-kei)', L("Causative"),
         L("make/let someone do X. Which sense depends on context"),
         L("negative stem + せる"),
         nil,
-        '書く→<b>書かせる</b>  飲む→<b>飲ませる</b>',
+        ex('書く','kaku','書かせる','kakaseru') .. '  ' .. ex('飲む','nomu','飲ませる','nomaseru'),
         L("remove る + させる"),
-        '食べる→<b>食べさせる</b>  見る→<b>見させる</b>',
-        'する→<b>させる</b>  くる→<b>こさせる</b>',
-        L("Causative-passive (made to do)") .. ': 書かせられる → 書かされる')
+        ex('食べる','taberu','食べさせる','tabesaseru') .. '  ' .. ex('見る','miru','見させる','misaseru'),
+        ex('する','suru','させる','saseru') .. '  ' .. ex('くる','kuru','こさせる','kosaseru'),
+        L("Causative-passive (made to do)") .. ': 書かせられる→書かされる ' .. r('(kakasareru)'))
 
-    vform('意向形', L("Volitional"),
-        L("'Let's do X' (invitation) or 'I intend to do X'. Used in 〜ようとする / 〜ようにする"),
+    vform('意向形', '(ikō-kei)', L("Volitional"),
+        L("'Let's do X' (invitation) or 'I intend to do X'. Used in 〜ようとする, 〜ようにする"),
         L("change to お-row + う"),
         nil,
-        '書く→<b>書こう</b>  飲む→<b>飲もう</b>  話す→<b>話そう</b>',
+        ex('書く','kaku','書こう','kakō') .. '  ' .. ex('飲む','nomu','飲もう','nomō') .. '  ' .. ex('話す','hanasu','話そう','hanasō'),
         L("remove る + よう"),
-        '食べる→<b>食べよう</b>  見る→<b>見よう</b>',
-        'する→<b>しよう</b>  くる→<b>こよう</b>',
+        ex('食べる','taberu','食べよう','tabeyō') .. '  ' .. ex('見る','miru','見よう','miyō'),
+        ex('する','suru','しよう','shiyō') .. '  ' .. ex('くる','kuru','こよう','koyō'),
         nil)
 
-    vform('命令形', L("Imperative"),
+    vform('命令形', '(meirei-kei)', L("Imperative"),
         L("direct commands. Blunt/rude in daily speech. Common in manga, sports, military"),
         L("change to え-row"),
         nil,
-        '書く→<b>書け</b>  飲む→<b>飲め</b>  話す→<b>話せ</b>',
-        L("remove る + ろ") .. ' (' .. L("literary") .. ': よ)',
-        '食べる→<b>食べろ</b>  見る→<b>見ろ</b>',
-        'する→<b>しろ</b>  くる→<b>こい</b>',
-        L("Polite alternative") .. ': て-' .. L("form") .. ' + ください')
+        ex('書く','kaku','書け','kake') .. '  ' .. ex('飲む','nomu','飲め','nome') .. '  ' .. ex('話す','hanasu','話せ','hanase'),
+        L("remove る + ろ") .. ' ' .. r('(literary: よ)'),
+        ex('食べる','taberu','食べろ','tabero') .. '  ' .. ex('見る','miru','見ろ','miro'),
+        ex('する','suru','しろ','shiro') .. '  ' .. ex('くる','kuru','こい','koi'),
+        L("Polite alternative") .. ': て-' .. L("form") .. ' + ください ' .. r('(kudasai)'))
 
-    h = h .. '<h3>条件形 — ' .. L("Conditional") .. '</h3>'
+    h = h .. '<h3>条件形 ' .. r('(jōken-kei)') .. ' — ' .. L("Conditional") .. '</h3>'
     h = h .. '<p style="margin-left:0.5em;color:#444"><i>' .. L("Use") .. ': ' .. L("three forms, each with different nuance") .. '</i></p>'
     h = h .. '<p style="margin-left:0.5em"><b>〜ば</b> — ' .. L("hypothetical: 'If X were to happen, then Y'") .. '</p>'
-    h = h .. '<p style="margin-left:1.2em"><b>五段:</b> ' .. L("え-row + ば") .. '  書く→<b>書けば</b>  飲む→<b>飲めば</b></p>'
-    h = h .. '<p style="margin-left:1.2em"><b>一段:</b> ' .. L("remove る + れば") .. '  食べる→<b>食べれば</b>  見る→<b>見れば</b></p>'
-    h = h .. '<p style="margin-left:1.2em"><b>' .. L("Irregular") .. ':</b>  する→<b>すれば</b>  くる→<b>くれば</b></p>'
+    h = h .. '<p style="margin-left:1.2em"><b>五段:</b> '  .. L("え-row + ば") .. '  '
+        .. ex('書く','kaku','書けば','kakeba') .. '  ' .. ex('飲む','nomu','飲めば','nomeba') .. '</p>'
+    h = h .. '<p style="margin-left:1.2em"><b>一段:</b> ' .. L("remove る + れば") .. '  '
+        .. ex('食べる','taberu','食べれば','tabereba') .. '  ' .. ex('見る','miru','見れば','mireba') .. '</p>'
+    h = h .. '<p style="margin-left:1.2em"><b>' .. L("Irregular") .. ':</b>  '
+        .. ex('する','suru','すれば','sureba') .. '  ' .. ex('くる','kuru','くれば','kureba') .. '</p>'
     h = h .. '<p style="margin-left:0.5em"><b>〜たら</b> — ' .. L("concrete/sequential: 'When / after X happens, Y'") .. '</p>'
-    h = h .. '<p style="margin-left:1.2em;color:#555">た-' .. L("form") .. ' + ら:  書いたら / 食べたら / したら / きたら</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">た-' .. L("form") .. ' + ら:  '
+        .. '書いたら ' .. r('(kaitara)') .. ',  食べたら ' .. r('(tabetara)') .. ',  したら ' .. r('(shitara)') .. '</p>'
     h = h .. '<p style="margin-left:0.5em"><b>〜と</b> — ' .. L("natural consequence: 'Whenever X, Y always follows' (not for intentions)") .. '</p>'
-    h = h .. '<p style="margin-left:1.2em;color:#555">' .. L("dictionary form") .. ' + と:  春になると桜が咲く</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">' .. L("dictionary form") .. ' + と:  '
+        .. '春になると桜が咲く ' .. r('(haru ni naru to sakura ga saku)') .. '</p>'
 
     _ref_verbs_cache = h .. _XHTML_TAIL
     return _ref_verbs_cache
@@ -327,6 +337,7 @@ local function _ref_adj()
     if _ref_adj_cache then return _ref_adj_cache end
     local L = _
     local h = _REF_HEAD
+    local function r(t) return '<font color="#888">' .. t .. '</font>' end
 
     local function row(form, rule, ex, use)
         h = h .. '<p style="margin-left:0.3em"><b>' .. form .. '</b>'
@@ -334,64 +345,64 @@ local function _ref_adj()
         if use then h = h .. '<p style="margin-left:1.2em;color:#444"><i>' .. use .. '</i></p>' end
     end
 
-    h = h .. '<h2>形容詞 · ' .. L("Adjectives") .. '</h2>'
+    h = h .. '<h2>形容詞 ' .. r('(keiyōshi)') .. ' · ' .. L("Adjectives") .. '</h2>'
 
     h = h .. '<h3>' .. L("Adjective types") .. '</h3>'
     h = h .. '<p><b>い-' .. L("adjectives") .. '</b> — ' .. L("end in い; conjugate by changing い") .. '</p>'
-    h = h .. '<p style="margin-left:1em;color:#555">高い・安い・大きい・いい  →  <b>高い山</b></p>'
+    h = h .. '<p style="margin-left:1em;color:#555">高い ' .. r('(takai)') .. ', 安い ' .. r('(yasui)') .. ', 大きい ' .. r('(ōkii)') .. ', いい ' .. r('(ii)') .. '  →  <b>高い山</b> ' .. r('(takai yama)') .. '</p>'
     h = h .. '<p><b>な-' .. L("adjectives") .. '</b> — ' .. L("add な before noun, だ as predicate") .. '</p>'
-    h = h .. '<p style="margin-left:1em;color:#555">静か・好き・元気・きれい  →  <b>静かな部屋</b></p>'
-    h = h .. '<p style="margin-left:0.5em;color:#666"><i>⚠ きれい・きらい ' .. L("look like い-adj but are な-adj") .. '</i></p>'
+    h = h .. '<p style="margin-left:1em;color:#555">静か ' .. r('(shizuka)') .. ', 好き ' .. r('(suki)') .. ', 元気 ' .. r('(genki)') .. '  →  <b>静かな部屋</b> ' .. r('(shizuka na heya)') .. '</p>'
+    h = h .. '<p style="margin-left:0.5em;color:#666"><i>⚠ きれい ' .. r('(kirei)') .. ', きらい ' .. r('(kirai)') .. ' ' .. L("look like い-adj but are な-adj") .. '</i></p>'
     h = h .. '<hr/>'
 
-    h = h .. '<h3>い-' .. L("adjectives") .. ' (高い / takai)</h3>'
-    row(L("Plain"),            '—',               '高い',         '高い山だ — "it is an expensive mountain"')
-    row(L("Negative"),         'い → くない',       '高くない',     L("not expensive"))
-    row(L("Past"),             'い → かった',       '高かった',     L("was expensive"))
-    row(L("Past negative"),    'い → くなかった',   '高くなかった', L("was not expensive"))
-    row(L("Adverb"),           'い → く',          '高く',         '高く飛ぶ — "fly high"')
-    row(L("Te-form"),          'い → くて',         '高くて',       '高くて買えない — "too expensive to buy"')
-    row(L("Conditional -ば"),  'い → ければ',       '高ければ',     '高ければ買わない')
-    row(L("Noun form"),        'い → さ',          '高さ',         L("height / expensiveness"))
-    row(L("Polite"),           'い → いです',       '高いです',     L("formal register"))
-    h = h .. '<p style="margin-left:0.5em;color:#666"><i>⚠ いい/よい (' .. L("good") .. ') '
-        .. L("is irregular") .. ': ' .. L("neg") .. '→よくない · ' .. L("past") .. '→よかった · '
-        .. L("adv") .. '→よく · ' .. L("cond") .. '→よければ</i></p>'
+    h = h .. '<h3>い-' .. L("adjectives") .. ' (高い ' .. r('takai') .. ')</h3>'
+    row(L("Plain"),           '—',               '高い ' .. r('takai'),         '高い山だ — "it is an expensive mountain"')
+    row(L("Negative"),        'い → くない',       '高くない ' .. r('takakunai'), L("not expensive"))
+    row(L("Past"),            'い → かった',       '高かった ' .. r('takakatta'), L("was expensive"))
+    row(L("Past negative"),   'い → くなかった',   '高くなかった ' .. r('takakunakatta'), L("was not expensive"))
+    row(L("Adverb"),          'い → く',          '高く ' .. r('takaku'),        '高く飛ぶ — "fly high"')
+    row(L("Te-form"),         'い → くて',         '高くて ' .. r('takakute'),   '高くて買えない — "too expensive to buy"')
+    row(L("Conditional -ば"), 'い → ければ',       '高ければ ' .. r('takakereba'), nil)
+    row(L("Noun form"),       'い → さ',          '高さ ' .. r('takasa'),        L("height / expensiveness"))
+    row(L("Polite"),          'い → いです',       '高いです ' .. r('takai desu'), L("formal register"))
+    h = h .. '<p style="margin-left:0.5em;color:#666"><i>⚠ いい/よい ' .. r('(ii/yoi)') .. ' (' .. L("good") .. ') '
+        .. L("is irregular") .. ': ' .. L("neg") .. '→よくない ' .. r('(yokunai)') .. ' · ' .. L("past") .. '→よかった ' .. r('(yokatta)') .. ' · '
+        .. L("adv") .. '→よく ' .. r('(yoku)') .. ' · ' .. L("cond") .. '→よければ ' .. r('(yokereba)') .. '</i></p>'
     h = h .. '<hr/>'
 
-    h = h .. '<h3>な-' .. L("adjectives") .. ' (静か / shizuka)</h3>'
-    row(L("Attributive") .. ' (+ な)',  '+ な',              '静かな',       '静かな場所 — "a quiet place"')
-    row(L("Predicative") .. ' (+ だ)',  '+ だ',              '静かだ',       L("it is quiet"))
-    row(L("Negative"),                  '+ じゃない',        '静かじゃない', 'ではない ' .. L("is more formal"))
-    row(L("Past"),                      '+ だった',          '静かだった',   L("it was quiet"))
-    row(L("Past negative"),             '+ じゃなかった',    '静かじゃなかった', L("it was not quiet"))
-    row(L("Adverb"),                    '+ に',              '静かに',       '静かに話す — "speak quietly"')
-    row(L("Te-form"),                   '+ で',              '静かで',       '静かで快適だ — "quiet and comfortable"')
-    row(L("Conditional"),               '+ なら(ば)',        '静かなら',     L("if it is quiet"))
-    row(L("Noun form"),                 '+ さ',              '静かさ',       L("quietness"))
-    row(L("Polite"),                    '+ です',            '静かです',     L("formal register"))
+    h = h .. '<h3>な-' .. L("adjectives") .. ' (静か ' .. r('shizuka') .. ')</h3>'
+    row(L("Attributive") .. ' (+ な)',  '+ な',              '静かな ' .. r('shizuka na'),         '静かな場所 — "a quiet place"')
+    row(L("Predicative") .. ' (+ だ)',  '+ だ',              '静かだ ' .. r('shizuka da'),         L("it is quiet"))
+    row(L("Negative"),                  '+ じゃない',        '静かじゃない ' .. r('shizuka ja nai'), 'ではない ' .. L("is more formal"))
+    row(L("Past"),                      '+ だった',          '静かだった ' .. r('shizuka datta'),  L("it was quiet"))
+    row(L("Past negative"),             '+ じゃなかった',    '静かじゃなかった ' .. r('shizuka ja nakatta'), nil)
+    row(L("Adverb"),                    '+ に',              '静かに ' .. r('shizuka ni'),         '静かに話す — "speak quietly"')
+    row(L("Te-form"),                   '+ で',              '静かで ' .. r('shizuka de'),         '静かで快適だ — "quiet and comfortable"')
+    row(L("Conditional"),               '+ なら(ば)',        '静かなら ' .. r('shizuka nara'),     L("if it is quiet"))
+    row(L("Noun form"),                 '+ さ',              '静かさ ' .. r('shizukasa'),          L("quietness"))
+    row(L("Polite"),                    '+ です',            '静かです ' .. r('shizuka desu'),     L("formal register"))
     h = h .. '<hr/>'
 
     h = h .. '<h3>' .. L("Comparison") .. '</h3>'
     h = h .. '<p><b>' .. L("More (comparative)") .. ':</b>  AはBより＋adj</p>'
-    h = h .. '<p style="margin-left:1.2em;color:#555">東京は大阪より大きい</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">東京は大阪より大きい ' .. r('(Tōkyō wa Ōsaka yori ōkii)') .. '</p>'
     h = h .. '<p><b>' .. L("Most (superlative)") .. ':</b>  〜の中で一番＋adj</p>'
-    h = h .. '<p style="margin-left:1.2em;color:#555">クラスの中で一番高い</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">クラスの中で一番高い ' .. r('(kurasu no naka de ichiban takai)') .. '</p>'
     h = h .. '<p><b>' .. L("As … as") .. ':</b>  AはBと同じくらい＋adj</p>'
-    h = h .. '<p style="margin-left:1.2em;color:#555">猫は犬と同じくらい可愛い</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">猫は犬と同じくらい可愛い ' .. r('(neko wa inu to onaji kurai kawaii)') .. '</p>'
     h = h .. '<p><b>' .. L("Not as … as") .. ':</b>  AはBほど＋adj+くない</p>'
-    h = h .. '<p style="margin-left:1.2em;color:#555">東京は大阪ほど安くない</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">東京は大阪ほど安くない ' .. r('(Tōkyō wa Ōsaka hodo yasukunai)') .. '</p>'
     h = h .. '<hr/>'
 
-    h = h .. '<h3>' .. L("Becoming / making") .. ' (なる / する)</h3>'
+    h = h .. '<h3>' .. L("Becoming / making") .. ' (なる/する)</h3>'
     h = h .. '<p><b>い-adj: く + なる</b> — ' .. L("become [adj]") .. '</p>'
-    h = h .. '<p style="margin-left:1.2em;color:#555">寒くなる — "become cold"</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">寒くなる ' .. r('(samuku naru)') .. ' — "become cold"</p>'
     h = h .. '<p><b>な-adj: に + なる</b> — ' .. L("become [adj]") .. '</p>'
-    h = h .. '<p style="margin-left:1.2em;color:#555">元気になる — "become healthy"</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">元気になる ' .. r('(genki ni naru)') .. ' — "become healthy"</p>'
     h = h .. '<p><b>い-adj: く + する</b> — ' .. L("make [adj]") .. '</p>'
-    h = h .. '<p style="margin-left:1.2em;color:#555">部屋を暖かくする — "make the room warm"</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">部屋を暖かくする ' .. r('(heya wo atatakaku suru)') .. '</p>'
     h = h .. '<p><b>な-adj: に + する</b> — ' .. L("make [adj]") .. '</p>'
-    h = h .. '<p style="margin-left:1.2em;color:#555">部屋を静かにする — "make the room quiet"</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">部屋を静かにする ' .. r('(heya wo shizuka ni suru)') .. '</p>'
 
     _ref_adj_cache = h .. _XHTML_TAIL
     return _ref_adj_cache
@@ -401,65 +412,65 @@ local function _ref_particles()
     if _ref_particles_cache then return _ref_particles_cache end
     local L = _
     local h = _REF_HEAD
+    local function r(t) return '<font color="#888">' .. t .. '</font>' end
 
-    local function particle(p, func, ex)
-        h = h .. '<p><b>' .. p .. '</b>  —  ' .. func .. '</p>'
-        h = h .. '<p style="margin-left:1.2em;color:#555">' .. ex .. '</p>'
+    local function particle(p, romaji, func, ex, ex_r)
+        h = h .. '<p><b>' .. p .. '</b> ' .. r(romaji) .. '  —  ' .. func .. '</p>'
+        h = h .. '<p style="margin-left:1.2em;color:#555">' .. ex .. ' ' .. r(ex_r) .. '</p>'
     end
 
-    local function pattern(pat, meaning, ex)
+    local function pattern(pat, meaning, ex, ex_r)
         h = h .. '<p><b>' .. pat .. '</b>  —  ' .. meaning .. '</p>'
-        h = h .. '<p style="margin-left:1.2em;color:#555">' .. ex .. '</p>'
+        h = h .. '<p style="margin-left:1.2em;color:#555">' .. ex .. ' ' .. r(ex_r) .. '</p>'
     end
 
-    h = h .. '<h2>助詞・文法 · ' .. L("Particles") .. ' &amp; ' .. L("Key Grammar") .. '</h2>'
+    h = h .. '<h2>助詞・文法 ' .. r('(joshi/bunpō)') .. ' · ' .. L("Particles") .. ' &amp; ' .. L("Key Grammar") .. '</h2>'
     h = h .. '<h3>' .. L("Core particles") .. '</h3>'
 
-    particle('は (wa)', L("Topic marker — what the sentence is about; contrasts with others"), '私は学生だ')
-    particle('が (ga)', L("Subject marker — who/what acts; emphasis; subordinate clauses"), '猫が好きだ・彼が来た')
-    particle('を (wo)', L("Direct object — receiver of the action"), 'りんごを食べる')
-    particle('に (ni)', L("Direction / destination / time / location of existence / indirect object"), '学校に行く・3時に起きる')
-    particle('で (de)', L("Location of action; means/tool; reason (formal)"), '図書館で読む・バスで行く')
-    particle('へ (e)',  L("Direction — softer/more literary than に"), '東京へ行く')
-    particle('の (no)', L("Possession; noun modifier ('of'); nominalizer"), '私の本・行くのが好き')
-    particle('と (to)', L("And (exhaustive); accompaniment (with); quotation"), '猫と犬・「行く」と言った')
-    particle('か (ka)', L("Question marker; or (between options)"), '行くか？・AかB')
-    particle('も (mo)', L("Also / too / even; replaces は/が/を"), '私も行く・何もない')
-    particle('だけ',    L("Only, just, nothing more than"), '一つだけ・これだけ')
-    particle('しか',    L("Nothing but / only — always with negative verb"), '一つしかない')
-    particle('から',    L("From (origin/time); because/since (cause)"), '駅から歩く・寒いから行かない')
-    particle('まで',    L("Until / up to (time or place)"), '5時まで・駅まで歩く')
-    particle('より',    L("Than (comparison); from (formal/literary)"), 'AよりBが好き')
-    particle('ので',    L("Because/since — soft, objective. More polite than から"), '雨なので行かない')
-    particle('のに',    L("Even though / despite — surprise or disappointment"), '頑張ったのに負けた')
+    particle('は', '(wa)', L("Topic marker — what the sentence is about; contrasts with others"),          '私は学生だ', '(watashi wa gakusei da)')
+    particle('が', '(ga)', L("Subject marker — who/what acts; emphasis; subordinate clauses"),            '猫が好きだ・彼が来た', '(neko ga suki da / kare ga kita)')
+    particle('を', '(wo)', L("Direct object — receiver of the action"),                                   'りんごを食べる', '(ringo wo taberu)')
+    particle('に', '(ni)', L("Direction / destination / time / location / indirect object"),               '学校に行く・3時に起きる', '(gakkō ni iku / sanji ni okiru)')
+    particle('で', '(de)', L("Location of action; means/tool; reason (formal)"),                          '図書館で読む・バスで行く', '(toshokan de yomu / basu de iku)')
+    particle('へ', '(e)',  L("Direction — softer/more literary than に"),                                  '東京へ行く', '(Tōkyō e iku)')
+    particle('の', '(no)', L("Possession; noun modifier ('of'); nominalizer"),                             '私の本・行くのが好き', '(watashi no hon / iku no ga suki)')
+    particle('と', '(to)', L("And (exhaustive); accompaniment (with); quotation"),                        '猫と犬・「行く」と言った', '(neko to inu / "iku" to itta)')
+    particle('か', '(ka)', L("Question marker; or (between options)"),                                    '行くか？・AかB', '(iku ka?)')
+    particle('も', '(mo)', L("Also / too / even; replaces は/が/を"),                                     '私も行く・何もない', '(watashi mo iku / nani mo nai)')
+    particle('だけ', '(dake)', L("Only, just, nothing more than"),                                         '一つだけ・これだけ', '(hitotsu dake / kore dake)')
+    particle('しか', '(shika)', L("Nothing but / only — always with negative verb"),                       '一つしかない', '(hitotsu shika nai)')
+    particle('から', '(kara)', L("From (origin/time); because/since (cause)"),                             '駅から歩く・寒いから行かない', '(eki kara aruku / samui kara ikanai)')
+    particle('まで', '(made)', L("Until / up to (time or place)"),                                         '5時まで・駅まで歩く', '(goji made / eki made aruku)')
+    particle('より', '(yori)', L("Than (comparison); from (formal/literary)"),                             'AよりBが好き', '(A yori B ga suki)')
+    particle('ので', '(node)', L("Because/since — soft, objective. More polite than から"),               '雨なので行かない', '(ame na node ikanai)')
+    particle('のに', '(noni)', L("Even though / despite — surprise or disappointment"),                   '頑張ったのに負けた', '(ganbatta noni maketa)')
     h = h .. '<hr/>'
 
     h = h .. '<h3>' .. L("Key sentence patterns") .. '</h3>'
-    pattern('〜ている',          L("ongoing action / resultant state"),              '食べている・結婚している')
-    pattern('〜ていた',          L("was doing / had done (at that time)"),           '寝ていた')
-    pattern('〜てみる',          L("try doing (to see what happens)"),               '食べてみる')
-    pattern('〜てしまう',        L("end up doing / done completely (often regret)"), '忘れてしまった')
-    pattern('〜てもいい',        L("permission: it's ok to do"),                     '行ってもいい')
-    pattern('〜てはいけない',    L("prohibition: must not do"),                      '入ってはいけない')
-    pattern('〜なければならない', L("obligation: must do"),                           '行かなければならない')
-    pattern('〜なくてもいい',    L("don't have to do"),                              '来なくてもいい')
-    pattern('〜かもしれない',    L("might / perhaps / possibility"),                 '雨かもしれない')
-    pattern('〜と思う',          L("I think that…"),                                 '行くと思う')
-    pattern('〜ようとする',      L("try to do (make attempt)"),                      '逃げようとする')
-    pattern('〜ようにする',      L("make effort to / try to habitually"),            '早く寝るようにする')
-    pattern('〜ことができる',    L("can / be able to do"),                           '泳ぐことができる')
-    pattern('〜たことがある',    L("have (ever) done (experience)"),                 '食べたことがある')
-    pattern('〜ながら',          L("while doing (simultaneous actions)"),            '音楽を聴きながら勉強する')
-    pattern('〜ばかり',          L("just did / doing nothing but"),                  '来たばかり・食べてばかりいる')
-    pattern('〜はずだ',          L("should be / expected to be"),                    '彼は来るはずだ')
-    pattern('〜そうだ',          L("looks like it will / I heard that"),             '雨が降りそうだ・行くそうだ')
-    pattern('〜らしい',          L("seems like / apparently (evidence-based)"),      '彼は忙しいらしい')
-    pattern('〜わけだ',          L("that explains it / that means (logical conclusion)"), 'だからそうなるわけだ')
+    pattern('〜ている',          L("ongoing action / resultant state"),              '食べている・結婚している', '(tabete iru / kekkon shite iru)')
+    pattern('〜ていた',          L("was doing / had done (at that time)"),           '寝ていた', '(nete ita)')
+    pattern('〜てみる',          L("try doing (to see what happens)"),               '食べてみる', '(tabete miru)')
+    pattern('〜てしまう',        L("end up doing / done completely (often regret)"), '忘れてしまった', '(wasurete shimatta)')
+    pattern('〜てもいい',        L("permission: it's ok to do"),                     '行ってもいい', '(itte mo ii)')
+    pattern('〜てはいけない',    L("prohibition: must not do"),                      '入ってはいけない', '(haitte wa ikenai)')
+    pattern('〜なければならない', L("obligation: must do"),                           '行かなければならない', '(ikanakereba naranai)')
+    pattern('〜なくてもいい',    L("don't have to do"),                              '来なくてもいい', '(konakute mo ii)')
+    pattern('〜かもしれない',    L("might / perhaps / possibility"),                 '雨かもしれない', '(ame kamo shirenai)')
+    pattern('〜と思う',          L("I think that…"),                                 '行くと思う', '(iku to omou)')
+    pattern('〜ようとする',      L("try to do (make attempt)"),                      '逃げようとする', '(nigeyō to suru)')
+    pattern('〜ようにする',      L("make effort to / try to habitually"),            '早く寝るようにする', '(hayaku neru yō ni suru)')
+    pattern('〜ことができる',    L("can / be able to do"),                           '泳ぐことができる', '(oyogu koto ga dekiru)')
+    pattern('〜たことがある',    L("have (ever) done (experience)"),                 '食べたことがある', '(tabeta koto ga aru)')
+    pattern('〜ながら',          L("while doing (simultaneous actions)"),            '音楽を聴きながら勉強する', '(ongaku wo kikinagara benkyō suru)')
+    pattern('〜ばかり',          L("just did / doing nothing but"),                  '来たばかり・食べてばかりいる', '(kita bakari / tabete bakari iru)')
+    pattern('〜はずだ',          L("should be / expected to be"),                    '彼は来るはずだ', '(kare wa kuru hazu da)')
+    pattern('〜そうだ',          L("looks like it will / I heard that"),             '雨が降りそうだ', '(ame ga furisō da)')
+    pattern('〜らしい',          L("seems like / apparently (evidence-based)"),      '彼は忙しいらしい', '(kare wa isogashii rashii)')
+    pattern('〜わけだ',          L("that explains it / that means (logical conclusion)"), 'だからそうなるわけだ', '(dakara sō naru wake da)')
 
     _ref_particles_cache = h .. _XHTML_TAIL
     return _ref_particles_cache
 end
-
 
 local function _html_esc(s)
     return s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
