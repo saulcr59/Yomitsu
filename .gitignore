@@ -224,3 +224,5 @@ dictionary-service/dictionaries/*
 # Ignore downloaded AI models (large .gguf files)
 translator-service/models/*
 !translator-service/models/.gitkeep
+# Yomitsu plugin local config (contains private server IPs)
+yomitsu.koplugin/config.json

@@ -1,0 +1,6 @@
+{
+    "server_host": "192.168.0.120",
+    "server_port": 8002,
+    "server_host_away": "",
+    "server_port_away": 8002
+}

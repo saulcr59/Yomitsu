@@ -615,13 +615,13 @@ end
 
 -- All Lua traffic goes to port 8002 only — the orchestrator proxies internally.
 -- These are overwritten at init() from G_reader_settings if the user has saved values.
-local _ORCH_HOST      = "192.168.0.120"
+local _ORCH_HOST      = "192.168.0.120"  -- stored home server
 local _ORCH_PORT      = 8002
-local _ORCH_HOST_AWAY = ""
+local _ORCH_HOST_AWAY = ""               -- stored away server
 local _ORCH_PORT_AWAY = 8002
 local _ORCH_USE_AWAY  = false
-local _DICT_HOST      = _ORCH_HOST
-local _DICT_PORT      = _ORCH_PORT
+local _ACTIVE_HOST    = _ORCH_HOST       -- currently active server (home or away)
+local _ACTIVE_PORT    = _ORCH_PORT
 local _DICT_PATH      = "/analyze-dict"
 
 local function _parse_host_port(s)
@@ -631,9 +631,9 @@ local function _parse_host_port(s)
     return s ~= "" and s or nil, nil
 end
 
+-- Sets the active connection target without touching the stored home/away values.
 local function _apply_server(host, port)
-    _ORCH_HOST = host; _ORCH_PORT = port
-    _DICT_HOST = host; _DICT_PORT = port
+    _ACTIVE_HOST = host; _ACTIVE_PORT = port
 end
 local TIMEOUT_SECS = 20
 
@@ -1639,11 +1639,11 @@ local function yomitsuInterceptor(scope, text, ...)
         -- Fire streams based on settings ─────────────────────────────────────────
         if show_ia then
             if show_trans then
-                async_stream_post(_ORCH_HOST, _ORCH_PORT, "/analyze-translation-stream",
+                async_stream_post(_ACTIVE_HOST, _ACTIVE_PORT, "/analyze-translation-stream",
                     ai_payload, my_id, 30, on_trans_chunk, on_trans_done)
             end
             if show_gram then
-                async_stream_post(_ORCH_HOST, _ORCH_PORT, "/analyze-grammar-stream",
+                async_stream_post(_ACTIVE_HOST, _ACTIVE_PORT, "/analyze-grammar-stream",
                     ai_payload, my_id, 55, on_gram_chunk, on_gram_done)
             end
         end
@@ -1677,7 +1677,7 @@ local function yomitsuInterceptor(scope, text, ...)
         dict_payload = json.encode({ context_phrase = safe_word, user_selection = safe_word })
     end
 
-    async_post_to(_DICT_HOST, _DICT_PORT, _DICT_PATH, dict_payload, my_id, 10,
+    async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, _DICT_PATH, dict_payload, my_id, 10,
         function(code1, body1)
         if my_id ~= _search_id then return end
 
@@ -1786,6 +1786,36 @@ function Yomitsu:init()
         end
     end
 
+    -- If config.json exists in the plugin directory and its content has changed
+    -- since the last load, its values override G_reader_settings. This lets a
+    -- new plugin install push updated server addresses without manual UI entry.
+    if self.path then
+        local cfg_path = self.path .. "/config.json"
+        local f = io.open(cfg_path, "r")
+        if f then
+            local content = f:read("*a")
+            f:close()
+            if content ~= (G_reader_settings:readSetting("yomitsu_config_content") or "") then
+                local ok, cfg = pcall(json.decode, content)
+                if ok and type(cfg) == "table" then
+                    if type(cfg.server_host) == "string" and cfg.server_host ~= "" then
+                        G_reader_settings:saveSetting("yomitsu_server_host", cfg.server_host)
+                    end
+                    if type(cfg.server_port) == "number" then
+                        G_reader_settings:saveSetting("yomitsu_server_port", cfg.server_port)
+                    end
+                    if type(cfg.server_host_away) == "string" then
+                        G_reader_settings:saveSetting("yomitsu_server_host_away", cfg.server_host_away)
+                    end
+                    if type(cfg.server_port_away) == "number" then
+                        G_reader_settings:saveSetting("yomitsu_server_port_away", cfg.server_port_away)
+                    end
+                    G_reader_settings:saveSetting("yomitsu_config_content", content)
+                end
+            end
+        end
+    end
+
     local h = G_reader_settings:readSetting("yomitsu_server_host")
     local p = G_reader_settings:readSetting("yomitsu_server_port")
     if h and h ~= "" then _ORCH_HOST = h end
@@ -1841,15 +1871,15 @@ end
 
 function Yomitsu:_testConnection()
     local http = require("socket.http")
-    local url  = "http://" .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT) .. "/health"
+    local url  = "http://" .. _ACTIVE_HOST .. ":" .. tostring(_ACTIVE_PORT) .. "/health"
     local t0   = os.time()
     local body, code = http.request(url)
     local elapsed = os.time() - t0
     local msg
     if body and code == 200 then
-        msg = string.format(_("Connection OK (%ds)\n%s:%s"), elapsed, _ORCH_HOST, tostring(_ORCH_PORT))
+        msg = string.format(_("Connection OK (%ds)\n%s:%s"), elapsed, _ACTIVE_HOST, tostring(_ACTIVE_PORT))
     else
-        msg = string.format(_("No response (%s)\n%s:%s"), tostring(code or "error"), _ORCH_HOST, tostring(_ORCH_PORT))
+        msg = string.format(_("No response (%s)\n%s:%s"), tostring(code or "error"), _ACTIVE_HOST, tostring(_ACTIVE_PORT))
     end
     UIManager:show(InfoMessage:new{ text = msg, timeout = 5 })
 end
@@ -1986,7 +2016,7 @@ function Yomitsu:addToMainMenu(menu_items)
         sub_item_table = {
             {
                 text_func = function()
-                    return _("Server: ") .. _ORCH_HOST .. ":" .. tostring(_ORCH_PORT)
+                    return _("Server: ") .. _ACTIVE_HOST .. ":" .. tostring(_ACTIVE_PORT)
                 end,
                 keep_menu_open = true,
                 callback = function(tmi)
