@@ -11,35 +11,10 @@ local logger           = require("logger")
 local DataStorage      = require("datastorage")
 local Screen = Device.screen
 
--- KOReader does not auto-load plugin l10n catalogs, so we read our own .po
--- file and wrap the system gettext with a plugin-local lookup.
+-- KOReader does not auto-load plugin l10n catalogs. _plugin_i18n is
+-- populated in Yomitsu:init() where self.path is reliably set.
 local _sys_gt = require("gettext")
-local _plugin_i18n = (function()
-    local lang = (G_reader_settings and G_reader_settings:readSetting("language") or "en")
-        :match("^(%a+)") or "en"
-    if lang == "en" then return {} end
-    local ok, info = pcall(debug.getinfo, 1, "S")
-    local plugin_dir = (ok and info and info.source:match("^@(.+)/main%.lua$")) or "."
-    local po_path = plugin_dir .. "/l10n/" .. lang .. ".po"
-    local f = io.open(po_path, "r")
-    if not f then return {} end
-    local tbl, last_id = {}, nil
-    for line in f:lines() do
-        local id = line:match('^msgid "(.*)"$')
-        if id then
-            last_id = id ~= "" and id:gsub('\\"', '"') or nil
-        else
-            local str = line:match('^msgstr "(.*)"$')
-            if str and last_id then
-                local v = str:gsub('\\"', '"')
-                if v ~= "" then tbl[last_id] = v end
-                last_id = nil
-            end
-        end
-    end
-    f:close()
-    return tbl
-end)()
+local _plugin_i18n = {}
 local function _(str) return _plugin_i18n[str] or _sys_gt(str) or str end
 
 local Yomitsu = WidgetContainer:extend{ name = "yomitsu", is_doc_only = true }
@@ -1782,6 +1757,35 @@ end
 -- ---------------------------------------------------------------------------
 
 function Yomitsu:init()
+    -- Load plugin translations. self.path is set by the plugin loader and
+    -- points to the plugin directory (e.g. .../plugins/yomitsu.koplugin).
+    do
+        local lang = (_sys_gt.lang
+            or G_reader_settings:readSetting("language")
+            or "en"):match("^(%a+)") or "en"
+        if lang ~= "en" and self.path then
+            local po_path = self.path .. "/l10n/" .. lang .. ".po"
+            local f = io.open(po_path, "r")
+            if f then
+                local last_id
+                for line in f:lines() do
+                    local id = line:match('^msgid "(.*)"$')
+                    if id then
+                        last_id = id ~= "" and id:gsub('\\"', '"') or nil
+                    else
+                        local str = line:match('^msgstr "(.*)"$')
+                        if str and last_id then
+                            local v = str:gsub('\\"', '"')
+                            if v ~= "" then _plugin_i18n[last_id] = v end
+                            last_id = nil
+                        end
+                    end
+                end
+                f:close()
+            end
+        end
+    end
+
     local h = G_reader_settings:readSetting("yomitsu_server_host")
     local p = G_reader_settings:readSetting("yomitsu_server_port")
     if h and h ~= "" then _ORCH_HOST = h end
