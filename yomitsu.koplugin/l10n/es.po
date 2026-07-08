@@ -132,10 +132,10 @@ msgstr "Irregular"
 msgid "Verb types"
 msgstr "Tipos de verbos"
 
-msgid "ends in: く・ぐ・す・つ・ぬ・ぶ・む・う, or る with あ/う/お before"
+msgid "ends in: く, ぐ, す, つ, ぬ, ぶ, む, う, or る with a/u/o before"
 msgstr "termina en: く・ぐ・す・つ・ぬ・ぶ・む・う, o る con あ/う/お antes"
 
-msgid "ends in る with い/え before"
+msgid "ends in る with i/e before"
 msgstr "termina en る con い/え antes"
 
 msgid "only two verbs"
@@ -150,7 +150,7 @@ msgstr "Negativo"
 msgid "negate an action: 'do not / does not do X'"
 msgstr "negar una acción: 'no hacer X'"
 
-msgid "change vowel to あ-row + ない"
+msgid "change final vowel to あ-row + ない"
 msgstr "cambiar vocal a fila あ + ない"
 
 msgid "remove る + ない"
@@ -165,7 +165,7 @@ msgstr "Pasado"
 msgid "past actions and events: 'did X / X happened'"
 msgstr "acciones y eventos pasados: 'hice X / ocurrió'"
 
-msgid "same stem as て-form, て→た / で→だ"
+msgid "same pattern as て-form: て→た, で→だ"
 msgstr "misma raíz que la forma て, て→た / で→だ"
 
 msgid "remove る + た"
@@ -189,7 +189,7 @@ msgstr "quitar る + て"
 msgid "Polite form"
 msgstr "Forma educada"
 
-msgid "formal register (teachers, strangers, work). Stem used in: 〜たい / 〜やすい / 〜にくい"
+msgid "formal register (teachers, strangers, work). Stem used in: 〜たい, 〜やすい, 〜にくい"
 msgstr "registro formal (profesores, desconocidos, trabajo). Raíz usada en: 〜たい / 〜やすい / 〜にくい"
 
 msgid "change to い-row + ます"
@@ -231,7 +231,7 @@ msgstr "coloquial"
 msgid "Passive"
 msgstr "Pasiva"
 
-msgid "(1) passive voice: 'X is done'. (2) nuisance: something happened to subject (迷惑の受身)"
+msgid "(1) passive voice: 'X is done'. (2) nuisance passive (迷惑の受身): something happened to subject"
 msgstr "(1) voz pasiva: 'X es hecho'. (2) afectivo: algo le ocurre al sujeto (迷惑の受身)"
 
 msgid "negative stem + れる"
@@ -258,7 +258,7 @@ msgstr "Causativa-pasiva (obligado a hacer)"
 msgid "Volitional"
 msgstr "Volitivo"
 
-msgid "'Let's do X' (invitation) or 'I intend to do X'. Used in 〜ようとする / 〜ようにする"
+msgid "'Let's do X' (invitation) or 'I intend to do X'. Used in 〜ようとする, 〜ようにする"
 msgstr "'Vamos a hacer X' (invitación) o 'Tengo intención de hacer X'. Usado en 〜ようとする / 〜ようにする"
 
 msgid "change to お-row + う"
@@ -438,7 +438,7 @@ msgstr "Marcador de sujeto — quién actúa; énfasis; oraciones subordinadas"
 msgid "Direct object — receiver of the action"
 msgstr "Objeto directo — receptor de la acción"
 
-msgid "Direction / destination / time / location of existence / indirect object"
+msgid "Direction / destination / time / location / indirect object"
 msgstr "Dirección / destino / tiempo / ubicación de existencia / objeto indirecto"
 
 msgid "Location of action; means/tool; reason (formal)"
@@ -542,3 +542,12 @@ msgstr "parece / aparentemente (basado en evidencia)"
 
 msgid "that explains it / that means (logical conclusion)"
 msgstr "eso lo explica / eso significa (conclusión lógica)"
+
+msgid "ku→ite, gu→ide, su→shite, tsu/u/ru→tte, nu/bu/mu→nde"
+msgstr "ku→ite, gu→ide, su→shite, tsu/u/ru→tte, nu/bu/mu→nde"
+
+msgid "Past"
+msgstr "Pasado"
+
+msgid "adjectives"
+msgstr "adjetivos"
