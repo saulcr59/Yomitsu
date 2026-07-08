@@ -122,3 +122,423 @@ msgstr "Partículas"
 
 msgid "Dictionaries"
 msgstr "Diccionarios"
+
+msgid "Use"
+msgstr "Uso"
+
+msgid "Irregular"
+msgstr "Irregular"
+
+msgid "Verb types"
+msgstr "Tipos de verbos"
+
+msgid "ends in: く・ぐ・す・つ・ぬ・ぶ・む・う, or る with あ/う/お before"
+msgstr "termina en: く・ぐ・す・つ・ぬ・ぶ・む・う, o る con あ/う/お antes"
+
+msgid "ends in る with い/え before"
+msgstr "termina en る con い/え antes"
+
+msgid "only two verbs"
+msgstr "solo dos verbos"
+
+msgid "Same sound, different type"
+msgstr "Mismo sonido, tipo diferente"
+
+msgid "Negative"
+msgstr "Negativo"
+
+msgid "negate an action: 'do not / does not do X'"
+msgstr "negar una acción: 'no hacer X'"
+
+msgid "change vowel to あ-row + ない"
+msgstr "cambiar vocal a fila あ + ない"
+
+msgid "remove る + ない"
+msgstr "quitar る + ない"
+
+msgid "Past negative: ない→なかった"
+msgstr "Negativo pasado: ない→なかった"
+
+msgid "Past tense"
+msgstr "Pasado"
+
+msgid "past actions and events: 'did X / X happened'"
+msgstr "acciones y eventos pasados: 'hice X / ocurrió'"
+
+msgid "same stem as て-form, て→た / で→だ"
+msgstr "misma raíz que la forma て, て→た / で→だ"
+
+msgid "remove る + た"
+msgstr "quitar る + た"
+
+msgid "Exception"
+msgstr "Excepción"
+
+msgid "not"
+msgstr "no"
+
+msgid "Te-form"
+msgstr "Forma て"
+
+msgid "connect actions; requests (〜てください); ongoing (〜ている); permission (〜てもいい)"
+msgstr "encadenar acciones; peticiones (〜てください); continuo (〜ている); permiso (〜てもいい)"
+
+msgid "remove る + て"
+msgstr "quitar る + て"
+
+msgid "Polite form"
+msgstr "Forma educada"
+
+msgid "formal register (teachers, strangers, work). Stem used in: 〜たい / 〜やすい / 〜にくい"
+msgstr "registro formal (profesores, desconocidos, trabajo). Raíz usada en: 〜たい / 〜やすい / 〜にくい"
+
+msgid "change to い-row + ます"
+msgstr "cambiar a fila い + ます"
+
+msgid "remove る + ます"
+msgstr "quitar る + ます"
+
+msgid "Want to do"
+msgstr "Querer hacer"
+
+msgid "express desire to do something. Conjugates like an い-adjective"
+msgstr "expresa deseo de hacer algo. Se conjuga como adjetivo い"
+
+msgid "ます-stem + たい"
+msgstr "raíz-ます + たい"
+
+msgid "remove る + たい"
+msgstr "quitar る + たい"
+
+msgid "Past: たかった  Neg: たくない  Past neg: たくなかった"
+msgstr "Pasado: たかった  Neg: たくない  Neg.pas.: たくなかった"
+
+msgid "Potential"
+msgstr "Potencial"
+
+msgid "can / be able to do X. Object often uses が instead of を"
+msgstr "poder hacer X. El objeto suele usar が en lugar de を"
+
+msgid "change to え-row + る"
+msgstr "cambiar a fila え + る"
+
+msgid "remove る + られる"
+msgstr "quitar る + られる"
+
+msgid "casual"
+msgstr "coloquial"
+
+msgid "Passive"
+msgstr "Pasiva"
+
+msgid "(1) passive voice: 'X is done'. (2) nuisance: something happened to subject (迷惑の受身)"
+msgstr "(1) voz pasiva: 'X es hecho'. (2) afectivo: algo le ocurre al sujeto (迷惑の受身)"
+
+msgid "negative stem + れる"
+msgstr "raíz negativa + れる"
+
+msgid "Example"
+msgstr "Ejemplo"
+
+msgid "Causative"
+msgstr "Causativa"
+
+msgid "make/let someone do X. Which sense depends on context"
+msgstr "hacer/dejar que alguien haga X. El sentido depende del contexto"
+
+msgid "negative stem + せる"
+msgstr "raíz negativa + せる"
+
+msgid "remove る + させる"
+msgstr "quitar る + させる"
+
+msgid "Causative-passive (made to do)"
+msgstr "Causativa-pasiva (obligado a hacer)"
+
+msgid "Volitional"
+msgstr "Volitivo"
+
+msgid "'Let's do X' (invitation) or 'I intend to do X'. Used in 〜ようとする / 〜ようにする"
+msgstr "'Vamos a hacer X' (invitación) o 'Tengo intención de hacer X'. Usado en 〜ようとする / 〜ようにする"
+
+msgid "change to お-row + う"
+msgstr "cambiar a fila お + う"
+
+msgid "remove る + よう"
+msgstr "quitar る + よう"
+
+msgid "Imperative"
+msgstr "Imperativo"
+
+msgid "direct commands. Blunt/rude in daily speech. Common in manga, sports, military"
+msgstr "órdenes directas. Brusco en el habla cotidiana. Común en manga, deporte, ejército"
+
+msgid "change to え-row"
+msgstr "cambiar a fila え"
+
+msgid "remove る + ろ"
+msgstr "quitar る + ろ"
+
+msgid "literary"
+msgstr "literario"
+
+msgid "Polite alternative"
+msgstr "Alternativa educada"
+
+msgid "form"
+msgstr "forma"
+
+msgid "Conditional"
+msgstr "Condicional"
+
+msgid "three forms, each with different nuance"
+msgstr "tres formas, cada una con matiz diferente"
+
+msgid "hypothetical: 'If X were to happen, then Y'"
+msgstr "hipotético: 'Si X ocurriera, entonces Y'"
+
+msgid "え-row + ば"
+msgstr "fila え + ば"
+
+msgid "remove る + れば"
+msgstr "quitar る + れば"
+
+msgid "concrete/sequential: 'When / after X happens, Y'"
+msgstr "concreto/secuencial: 'Cuando / después de que X ocurra, Y'"
+
+msgid "natural consequence: 'Whenever X, Y always follows' (not for intentions)"
+msgstr "consecuencia natural: 'Siempre que X, Y siempre sigue' (no para intenciones)"
+
+msgid "dictionary form"
+msgstr "forma diccionario"
+
+msgid "Adjective types"
+msgstr "Tipos de adjetivos"
+
+msgid "end in い; conjugate by changing い"
+msgstr "terminan en い; se conjugan cambiando い"
+
+msgid "add な before noun, だ as predicate"
+msgstr "añadir な antes del sustantivo, だ como predicado"
+
+msgid "look like い-adj but are な-adj"
+msgstr "parecen adjetivos い pero son adjetivos な"
+
+msgid "Plain"
+msgstr "Simple"
+
+msgid "Past negative"
+msgstr "Negativo pasado"
+
+msgid "Adverb"
+msgstr "Adverbio"
+
+msgid "Conditional -ば"
+msgstr "Condicional -ば"
+
+msgid "Noun form"
+msgstr "Forma nominal"
+
+msgid "Polite"
+msgstr "Formal"
+
+msgid "good"
+msgstr "bueno"
+
+msgid "is irregular"
+msgstr "es irregular"
+
+msgid "neg"
+msgstr "neg"
+
+msgid "past"
+msgstr "pas"
+
+msgid "adv"
+msgstr "adv"
+
+msgid "cond"
+msgstr "cond"
+
+msgid "Attributive"
+msgstr "Atributivo"
+
+msgid "Predicative"
+msgstr "Predicativo"
+
+msgid "is more formal"
+msgstr "es más formal"
+
+msgid "it is quiet"
+msgstr "está tranquilo"
+
+msgid "it was quiet"
+msgstr "estaba tranquilo"
+
+msgid "it was not quiet"
+msgstr "no estaba tranquilo"
+
+msgid "if it is quiet"
+msgstr "si está tranquilo"
+
+msgid "quietness"
+msgstr "tranquilidad"
+
+msgid "formal register"
+msgstr "registro formal"
+
+msgid "not expensive"
+msgstr "no es caro"
+
+msgid "was expensive"
+msgstr "era caro"
+
+msgid "was not expensive"
+msgstr "no era caro"
+
+msgid "height / expensiveness"
+msgstr "altura / carestía"
+
+msgid "Comparison"
+msgstr "Comparación"
+
+msgid "More (comparative)"
+msgstr "Más (comparativo)"
+
+msgid "Most (superlative)"
+msgstr "El más (superlativo)"
+
+msgid "As … as"
+msgstr "Tan … como"
+
+msgid "Not as … as"
+msgstr "No tan … como"
+
+msgid "Becoming / making"
+msgstr "Llegar a ser / hacer"
+
+msgid "become [adj]"
+msgstr "llegar a ser [adj]"
+
+msgid "make [adj]"
+msgstr "hacer que sea [adj]"
+
+msgid "Key Grammar"
+msgstr "Gramática clave"
+
+msgid "Core particles"
+msgstr "Partículas principales"
+
+msgid "Topic marker — what the sentence is about; contrasts with others"
+msgstr "Marcador de tema — de qué trata la oración; contrasta con otras cosas"
+
+msgid "Subject marker — who/what acts; emphasis; subordinate clauses"
+msgstr "Marcador de sujeto — quién actúa; énfasis; oraciones subordinadas"
+
+msgid "Direct object — receiver of the action"
+msgstr "Objeto directo — receptor de la acción"
+
+msgid "Direction / destination / time / location of existence / indirect object"
+msgstr "Dirección / destino / tiempo / ubicación de existencia / objeto indirecto"
+
+msgid "Location of action; means/tool; reason (formal)"
+msgstr "Lugar de la acción; medio/herramienta; razón (formal)"
+
+msgid "Direction — softer/more literary than に"
+msgstr "Dirección — más suave/literario que に"
+
+msgid "Possession; noun modifier ('of'); nominalizer"
+msgstr "Posesión; modificador nominal ('de'); nominalizador"
+
+msgid "And (exhaustive); accompaniment (with); quotation"
+msgstr "Y (exhaustivo); compañía (con); cita"
+
+msgid "Question marker; or (between options)"
+msgstr "Marcador de pregunta; o (entre opciones)"
+
+msgid "Also / too / even; replaces は/が/を"
+msgstr "También / incluso; reemplaza は/が/を"
+
+msgid "Only, just, nothing more than"
+msgstr "Solo, nada más que"
+
+msgid "Nothing but / only — always with negative verb"
+msgstr "Nada más que / solo — siempre con verbo negativo"
+
+msgid "From (origin/time); because/since (cause)"
+msgstr "Desde (origen/tiempo); porque/ya que (causa)"
+
+msgid "Until / up to (time or place)"
+msgstr "Hasta (tiempo o lugar)"
+
+msgid "Than (comparison); from (formal/literary)"
+msgstr "Que (comparación); desde (formal/literario)"
+
+msgid "Because/since — soft, objective. More polite than から"
+msgstr "Porque/ya que — suave, objetivo. Más cortés que から"
+
+msgid "Even though / despite — surprise or disappointment"
+msgstr "Aunque / a pesar de — expresa sorpresa o decepción"
+
+msgid "Key sentence patterns"
+msgstr "Patrones de frases clave"
+
+msgid "ongoing action / resultant state"
+msgstr "acción continua / estado resultante"
+
+msgid "was doing / had done (at that time)"
+msgstr "estaba haciendo / había hecho (en ese momento)"
+
+msgid "try doing (to see what happens)"
+msgstr "intentar hacer (para ver qué pasa)"
+
+msgid "end up doing / done completely (often regret)"
+msgstr "terminar haciendo / completado (a menudo con arrepentimiento)"
+
+msgid "permission: it's ok to do"
+msgstr "permiso: está bien hacer"
+
+msgid "prohibition: must not do"
+msgstr "prohibición: no se debe hacer"
+
+msgid "obligation: must do"
+msgstr "obligación: hay que hacer"
+
+msgid "don't have to do"
+msgstr "no hace falta hacer"
+
+msgid "might / perhaps / possibility"
+msgstr "quizás / tal vez / posibilidad"
+
+msgid "I think that…"
+msgstr "Creo que…"
+
+msgid "try to do (make attempt)"
+msgstr "intentar hacer (hacer un intento)"
+
+msgid "make effort to / try to habitually"
+msgstr "esforzarse por / intentar habitualmente"
+
+msgid "can / be able to do"
+msgstr "poder hacer"
+
+msgid "have (ever) done (experience)"
+msgstr "haber hecho alguna vez (experiencia)"
+
+msgid "while doing (simultaneous actions)"
+msgstr "mientras hace (acciones simultáneas)"
+
+msgid "just did / doing nothing but"
+msgstr "acaba de hacer / no hace más que"
+
+msgid "should be / expected to be"
+msgstr "debería ser / se espera que sea"
+
+msgid "looks like it will / I heard that"
+msgstr "parece que va a / he oído que"
+
+msgid "seems like / apparently (evidence-based)"
+msgstr "parece / aparentemente (basado en evidencia)"
+
+msgid "that explains it / that means (logical conclusion)"
+msgstr "eso lo explica / eso significa (conclusión lógica)"
