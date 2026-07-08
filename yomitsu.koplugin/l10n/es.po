@@ -108,5 +108,17 @@ msgstr "  └ Traducción"
 msgid "  └ Grammar breakdown"
 msgstr "  └ Desglose"
 
+msgid "Grammar reference"
+msgstr "Referencia gramatical"
+
+msgid "Verbs"
+msgstr "Verbos"
+
+msgid "Adjectives"
+msgstr "Adjetivos"
+
+msgid "Particles"
+msgstr "Partículas"
+
 msgid "Dictionaries"
 msgstr "Diccionarios"

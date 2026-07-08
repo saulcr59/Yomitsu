@@ -161,6 +161,139 @@ local _XHTML_HEAD = '<?xml version="1.0" encoding="UTF-8"?>'
     .. '</style></head><body>'
 local _XHTML_TAIL = '</body></html>'
 
+-- ---------------------------------------------------------------------------
+-- Grammar reference pages (static HTML, opened from the menu)
+-- ---------------------------------------------------------------------------
+local _REF_HEAD = '<?xml version="1.0" encoding="UTF-8"?>'
+    .. '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"'
+    .. ' "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">'
+    .. '<html xmlns="http://www.w3.org/1999/xhtml">'
+    .. '<head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>'
+    .. '<style type="text/css">'
+    .. 'body{margin:0;padding:0.3em 0.5em;font-size:0.82em;line-height:1.4;text-align:left}'
+    .. 'table{border-collapse:collapse;width:100%;margin:0.4em 0}'
+    .. 'th,td{border:1px solid #999;padding:0.15em 0.25em}'
+    .. 'th{font-weight:bold;background-color:#e8e8e8}'
+    .. 'h2{font-size:1.05em;margin:0.5em 0 0.2em 0;border-bottom:1px solid #ccc}'
+    .. 'h3{font-size:0.95em;margin:0.6em 0 0.15em 0}'
+    .. 'p{margin:0.25em 0}'
+    .. 'small{font-size:0.85em;color:#666}'
+    .. '</style></head><body>'
+
+local _REF_VERBS_HTML = _REF_HEAD .. [[
+<h2>動詞の活用 · Verb Conjugation</h2>
+<table>
+<tr><th>Form</th><th>五段 書く</th><th>一段 食べる</th><th>する</th><th>くる</th></tr>
+<tr><td>Plain (dict)</td><td>書く</td><td>食べる</td><td>する</td><td>くる</td></tr>
+<tr><td>Negative</td><td>書かない</td><td>食べない</td><td>しない</td><td>こない</td></tr>
+<tr><td>Past</td><td>書いた</td><td>食べた</td><td>した</td><td>きた</td></tr>
+<tr><td>Past neg.</td><td>書かなかった</td><td>食べなかった</td><td>しなかった</td><td>こなかった</td></tr>
+<tr><td>Te-form</td><td>書いて</td><td>食べて</td><td>して</td><td>きて</td></tr>
+<tr><td>Tai (want)</td><td>書きたい</td><td>食べたい</td><td>したい</td><td>きたい</td></tr>
+<tr><td>Potential</td><td>書ける</td><td>食べられる</td><td>できる</td><td>こられる</td></tr>
+<tr><td>Passive</td><td>書かれる</td><td>食べられる</td><td>される</td><td>こられる</td></tr>
+<tr><td>Causative</td><td>書かせる</td><td>食べさせる</td><td>させる</td><td>こさせる</td></tr>
+<tr><td>Volitional</td><td>書こう</td><td>食べよう</td><td>しよう</td><td>こよう</td></tr>
+<tr><td>Imperative</td><td>書け</td><td>食べろ</td><td>しろ</td><td>こい</td></tr>
+<tr><td>Cond. -ば</td><td>書けば</td><td>食べれば</td><td>すれば</td><td>くれば</td></tr>
+<tr><td>Cond. -たら</td><td>書いたら</td><td>食べたら</td><td>したら</td><td>きたら</td></tr>
+<tr><td>Stem (-ます)</td><td>書き</td><td>食べ</td><td>し</td><td>き</td></tr>
+<tr><td>Polite</td><td>書きます</td><td>食べます</td><td>します</td><td>きます</td></tr>
+</table>
+<h3>五段 te/ta stem changes</h3>
+<table>
+<tr><th>Ending</th><th>→ て/た</th><th>Examples</th></tr>
+<tr><td>-く</td><td>-いて/-いた</td><td>書く→書いて ※行く→行って</td></tr>
+<tr><td>-ぐ</td><td>-いで/-いだ</td><td>泳ぐ→泳いで</td></tr>
+<tr><td>-す</td><td>-して/-した</td><td>話す→話して</td></tr>
+<tr><td>-つ・う・る</td><td>-って/-った</td><td>待つ→待って、買う→買った</td></tr>
+<tr><td>-ぬ・ぶ・む</td><td>-んで/-んだ</td><td>飲む→飲んで、遊ぶ→遊んで</td></tr>
+</table>
+<h3>Negative stem (未然形) — 五段</h3>
+<p>く→か・ぐ→が・す→さ・つ→た・う→わ・ぬ→な・ぶ→ば・む→ま・る→ら</p>
+<p><small>Ej: 書く→書かない　買う→買わない　話す→話さない</small></p>
+]] .. _XHTML_TAIL
+
+local _REF_ADJ_HTML = _REF_HEAD .. [[
+<h2>形容詞の活用 · Adjective Conjugation</h2>
+<h3>い-adjectives (高い)</h3>
+<table>
+<tr><th>Form</th><th>高い</th><th>Usage</th></tr>
+<tr><td>Plain</td><td>高い</td><td>高い山</td></tr>
+<tr><td>Negative</td><td>高くない</td><td></td></tr>
+<tr><td>Past</td><td>高かった</td><td></td></tr>
+<tr><td>Past neg.</td><td>高くなかった</td><td></td></tr>
+<tr><td>Adverb</td><td>高く</td><td>高く飛ぶ</td></tr>
+<tr><td>Te-form</td><td>高くて</td><td>高くて買えない</td></tr>
+<tr><td>Conditional</td><td>高ければ</td><td>高ければ買わない</td></tr>
+<tr><td>Noun form</td><td>高さ</td><td></td></tr>
+</table>
+<p><small>※ いい／よい: neg.→よくない · past→よかった · adv.→よく · cond.→よければ</small></p>
+<h3>な-adjectives (静か)</h3>
+<table>
+<tr><th>Form</th><th>静か</th><th>Usage</th></tr>
+<tr><td>Attributive</td><td>静かな</td><td>静かな場所</td></tr>
+<tr><td>Predicative</td><td>静かだ</td><td></td></tr>
+<tr><td>Negative</td><td>静かじゃない</td><td>静かではない (formal)</td></tr>
+<tr><td>Past</td><td>静かだった</td><td></td></tr>
+<tr><td>Past neg.</td><td>静かじゃなかった</td><td></td></tr>
+<tr><td>Adverb</td><td>静かに</td><td>静かに話す</td></tr>
+<tr><td>Te-form</td><td>静かで</td><td>静かで居心地がいい</td></tr>
+<tr><td>Conditional</td><td>静かなら(ば)</td><td></td></tr>
+<tr><td>Noun form</td><td>静かさ</td><td></td></tr>
+</table>
+<h3>Degrees of comparison</h3>
+<table>
+<tr><th></th><th>い-adj</th><th>な-adj</th></tr>
+<tr><td>More</td><td>もっと高い</td><td>もっと静かな</td></tr>
+<tr><td>A is more than B</td><td colspan="2">AはBより高い</td></tr>
+<tr><td>Most</td><td colspan="2">一番高い・最も静かだ</td></tr>
+<tr><td>As … as</td><td colspan="2">AはBと同じくらい高い</td></tr>
+</table>
+]] .. _XHTML_TAIL
+
+local _REF_PARTICLES_HTML = _REF_HEAD .. [[
+<h2>助詞・文法 · Particles &amp; Key Grammar</h2>
+<h3>Core particles</h3>
+<table>
+<tr><th>Particle</th><th>Function</th><th>Example</th></tr>
+<tr><td>は (wa)</td><td>Topic marker</td><td>私は学生だ</td></tr>
+<tr><td>が (ga)</td><td>Subject / emphasis</td><td>猫が好きだ</td></tr>
+<tr><td>を (wo)</td><td>Direct object</td><td>りんごを食べる</td></tr>
+<tr><td>に (ni)</td><td>Direction, location, time, indirect obj.</td><td>学校に行く</td></tr>
+<tr><td>で (de)</td><td>Location of action, means/tool</td><td>図書館で読む</td></tr>
+<tr><td>へ (e)</td><td>Direction (softer than に)</td><td>東京へ行く</td></tr>
+<tr><td>の (no)</td><td>Possession, noun modifier</td><td>私の本</td></tr>
+<tr><td>と (to)</td><td>And (exhaustive), with, quotation</td><td>猫と犬、「行く」と言った</td></tr>
+<tr><td>か (ka)</td><td>Question, or</td><td>行くか？・AかB</td></tr>
+<tr><td>も (mo)</td><td>Also, too, even</td><td>私も行く</td></tr>
+<tr><td>だけ</td><td>Only, just</td><td>一つだけ</td></tr>
+<tr><td>しか</td><td>Nothing but (+ negative)</td><td>一つしかない</td></tr>
+<tr><td>から</td><td>From, because</td><td>駅から歩く・寒いから…</td></tr>
+<tr><td>まで</td><td>Until, up to</td><td>駅まで歩く</td></tr>
+<tr><td>より</td><td>Than, from (formal)</td><td>AよりBが好き</td></tr>
+</table>
+<h3>Key sentence patterns</h3>
+<table>
+<tr><th>Pattern</th><th>Meaning</th><th>Example</th></tr>
+<tr><td>〜ている</td><td>ongoing / resultant state</td><td>食べている・結婚している</td></tr>
+<tr><td>〜ていた</td><td>was doing / had done</td><td>走っていた</td></tr>
+<tr><td>〜てみる</td><td>try doing</td><td>食べてみる</td></tr>
+<tr><td>〜てしまう</td><td>end up doing / regret</td><td>忘れてしまった</td></tr>
+<tr><td>〜てもいい</td><td>it's ok to do</td><td>行ってもいい</td></tr>
+<tr><td>〜てはいけない</td><td>must not do</td><td>入ってはいけない</td></tr>
+<tr><td>〜なければならない</td><td>must do</td><td>行かなければならない</td></tr>
+<tr><td>〜かもしれない</td><td>might, perhaps</td><td>雨かもしれない</td></tr>
+<tr><td>〜と思う</td><td>I think that…</td><td>行くと思う</td></tr>
+<tr><td>〜ようにする</td><td>make effort to</td><td>早く寝るようにする</td></tr>
+<tr><td>〜ことができる</td><td>can, be able to</td><td>泳ぐことができる</td></tr>
+<tr><td>〜たことがある</td><td>have (ever) done</td><td>食べたことがある</td></tr>
+<tr><td>〜ながら</td><td>while doing</td><td>音楽を聴きながら</td></tr>
+<tr><td>〜ので</td><td>because (soft)</td><td>雨なので…</td></tr>
+<tr><td>〜のに</td><td>even though</td><td>頑張ったのに…</td></tr>
+</table>
+]] .. _XHTML_TAIL
+
 local function _html_esc(s)
     return s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
 end
@@ -1585,6 +1718,38 @@ function Yomitsu:addToMainMenu(menu_items)
         return items
     end
 
+    function Yomitsu:_showReference()
+        local results = {
+            {
+                dict       = _("Verbs"),
+                word       = _("Grammar reference"),
+                definition = _REF_VERBS_HTML,
+                is_html    = true,
+            },
+            {
+                dict       = _("Adjectives"),
+                word       = _("Grammar reference"),
+                definition = _REF_ADJ_HTML,
+                is_html    = true,
+            },
+            {
+                dict       = _("Particles"),
+                word       = _("Grammar reference"),
+                definition = _REF_PARTICLES_HTML,
+                is_html    = true,
+            },
+        }
+        local viewer = DictQuickLookup:new{
+            ui         = self.ui,
+            lookupword = _("Grammar reference"),
+            is_html    = true,
+            results    = results,
+            width      = Screen:getWidth() - 20,
+            height     = Screen:getHeight(),
+        }
+        UIManager:show(viewer)
+    end
+
     menu_items.yomitsu = {
         text = "Yomitsu",
         sub_item_table = {
@@ -1661,6 +1826,10 @@ function Yomitsu:addToMainMenu(menu_items)
                 checked_func = function() return _cfg_bool("yomitsu_show_grammar", true) end,
                 enabled_func = function() return _cfg_bool("yomitsu_show_ia", true) end,
                 callback = function(tmi) toggle("yomitsu_show_grammar", true, tmi) end,
+            },
+            {
+                text = _("Grammar reference"),
+                callback = function() self:_showReference() end,
             },
             {
                 text = _("Dictionaries"),
