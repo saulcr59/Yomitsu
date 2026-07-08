@@ -162,7 +162,7 @@ local _XHTML_HEAD = '<?xml version="1.0" encoding="UTF-8"?>'
 local _XHTML_TAIL = '</body></html>'
 
 -- ---------------------------------------------------------------------------
--- Grammar reference pages (static HTML, opened from the menu)
+-- Grammar reference pages (static HTML, shown as tabs in every lookup)
 -- ---------------------------------------------------------------------------
 local _REF_HEAD = '<?xml version="1.0" encoding="UTF-8"?>'
     .. '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"'
@@ -170,127 +170,248 @@ local _REF_HEAD = '<?xml version="1.0" encoding="UTF-8"?>'
     .. '<html xmlns="http://www.w3.org/1999/xhtml">'
     .. '<head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>'
     .. '<style type="text/css">'
-    .. 'body{margin:0;padding:0.3em 0.5em;font-size:0.82em;line-height:1.4;text-align:left}'
-    .. 'table{border-collapse:collapse;width:100%;margin:0.4em 0}'
-    .. 'th,td{border:1px solid #999;padding:0.15em 0.25em}'
+    .. 'body{margin:0;padding:0.3em 0.5em;font-size:0.82em;line-height:1.45;text-align:left}'
+    .. 'table{border-collapse:collapse;width:100%;margin:0.3em 0 0.6em 0}'
+    .. 'th,td{border:1px solid #999;padding:0.15em 0.3em;vertical-align:top}'
     .. 'th{font-weight:bold;background-color:#e8e8e8}'
-    .. 'h2{font-size:1.05em;margin:0.5em 0 0.2em 0;border-bottom:1px solid #ccc}'
-    .. 'h3{font-size:0.95em;margin:0.6em 0 0.15em 0}'
-    .. 'p{margin:0.25em 0}'
-    .. 'small{font-size:0.85em;color:#666}'
+    .. 'h2{font-size:1.05em;margin:0.5em 0 0.3em 0;border-bottom:2px solid #888;padding-bottom:0.1em}'
+    .. 'h3{font-size:0.95em;margin:0.7em 0 0.1em 0;border-bottom:1px solid #ccc}'
+    .. 'p{margin:0.2em 0}'
+    .. '.use{color:#333;font-style:italic}'
+    .. '.note{color:#666;font-size:0.88em}'
     .. '</style></head><body>'
 
-local _REF_VERBS_HTML = _REF_HEAD .. [[
-<h2>動詞の活用 · Verb Conjugation</h2>
-<table>
-<tr><th>Form</th><th>五段 書く</th><th>一段 食べる</th><th>する</th><th>くる</th></tr>
-<tr><td>Plain (dict)</td><td>書く</td><td>食べる</td><td>する</td><td>くる</td></tr>
-<tr><td>Negative</td><td>書かない</td><td>食べない</td><td>しない</td><td>こない</td></tr>
-<tr><td>Past</td><td>書いた</td><td>食べた</td><td>した</td><td>きた</td></tr>
-<tr><td>Past neg.</td><td>書かなかった</td><td>食べなかった</td><td>しなかった</td><td>こなかった</td></tr>
-<tr><td>Te-form</td><td>書いて</td><td>食べて</td><td>して</td><td>きて</td></tr>
-<tr><td>Tai (want)</td><td>書きたい</td><td>食べたい</td><td>したい</td><td>きたい</td></tr>
-<tr><td>Potential</td><td>書ける</td><td>食べられる</td><td>できる</td><td>こられる</td></tr>
-<tr><td>Passive</td><td>書かれる</td><td>食べられる</td><td>される</td><td>こられる</td></tr>
-<tr><td>Causative</td><td>書かせる</td><td>食べさせる</td><td>させる</td><td>こさせる</td></tr>
-<tr><td>Volitional</td><td>書こう</td><td>食べよう</td><td>しよう</td><td>こよう</td></tr>
-<tr><td>Imperative</td><td>書け</td><td>食べろ</td><td>しろ</td><td>こい</td></tr>
-<tr><td>Cond. -ば</td><td>書けば</td><td>食べれば</td><td>すれば</td><td>くれば</td></tr>
-<tr><td>Cond. -たら</td><td>書いたら</td><td>食べたら</td><td>したら</td><td>きたら</td></tr>
-<tr><td>Stem (-ます)</td><td>書き</td><td>食べ</td><td>し</td><td>き</td></tr>
-<tr><td>Polite</td><td>書きます</td><td>食べます</td><td>します</td><td>きます</td></tr>
-</table>
-<h3>五段 te/ta stem changes</h3>
-<table>
-<tr><th>Ending</th><th>→ て/た</th><th>Examples</th></tr>
-<tr><td>-く</td><td>-いて/-いた</td><td>書く→書いて ※行く→行って</td></tr>
-<tr><td>-ぐ</td><td>-いで/-いだ</td><td>泳ぐ→泳いで</td></tr>
-<tr><td>-す</td><td>-して/-した</td><td>話す→話して</td></tr>
-<tr><td>-つ・う・る</td><td>-って/-った</td><td>待つ→待って、買う→買った</td></tr>
-<tr><td>-ぬ・ぶ・む</td><td>-んで/-んだ</td><td>飲む→飲んで、遊ぶ→遊んで</td></tr>
-</table>
-<h3>Negative stem (未然形) — 五段</h3>
-<p>く→か・ぐ→が・す→さ・つ→た・う→わ・ぬ→な・ぶ→ば・む→ま・る→ら</p>
-<p><small>Ej: 書く→書かない　買う→買わない　話す→話さない</small></p>
-]] .. _XHTML_TAIL
+-- ── Verbs ──────────────────────────────────────────────────────────────────
+local _REF_VERBS_HTML = _REF_HEAD .. [=[
+<h2>動詞 · Verbs</h2>
 
-local _REF_ADJ_HTML = _REF_HEAD .. [[
-<h2>形容詞の活用 · Adjective Conjugation</h2>
-<h3>い-adjectives (高い)</h3>
+<h3>Verb types — how to identify them</h3>
 <table>
-<tr><th>Form</th><th>高い</th><th>Usage</th></tr>
-<tr><td>Plain</td><td>高い</td><td>高い山</td></tr>
-<tr><td>Negative</td><td>高くない</td><td></td></tr>
-<tr><td>Past</td><td>高かった</td><td></td></tr>
-<tr><td>Past neg.</td><td>高くなかった</td><td></td></tr>
-<tr><td>Adverb</td><td>高く</td><td>高く飛ぶ</td></tr>
-<tr><td>Te-form</td><td>高くて</td><td>高くて買えない</td></tr>
-<tr><td>Conditional</td><td>高ければ</td><td>高ければ買わない</td></tr>
-<tr><td>Noun form</td><td>高さ</td><td></td></tr>
+<tr><th>Type</th><th>Ending</th><th>Examples</th></tr>
+<tr><td><b>五段 (u-verbs)</b><br/><span class="note">Group 1</span></td><td>-く-ぐ-す-つ-ぬ-ぶ-む-う<br/>-る (with a/u/o before)</td><td>書く・泳ぐ・話す・待つ<br/>飲む・切る・買う</td></tr>
+<tr><td><b>一段 (ru-verbs)</b><br/><span class="note">Group 2</span></td><td>-る (with い/え before)</td><td>食べる・見る・起きる<br/>教える・着る</td></tr>
+<tr><td><b>不規則 (irregular)</b></td><td>Only two verbs</td><td>する・くる</td></tr>
 </table>
-<p><small>※ いい／よい: neg.→よくない · past→よかった · adv.→よく · cond.→よければ</small></p>
-<h3>な-adjectives (静か)</h3>
-<table>
-<tr><th>Form</th><th>静か</th><th>Usage</th></tr>
-<tr><td>Attributive</td><td>静かな</td><td>静かな場所</td></tr>
-<tr><td>Predicative</td><td>静かだ</td><td></td></tr>
-<tr><td>Negative</td><td>静かじゃない</td><td>静かではない (formal)</td></tr>
-<tr><td>Past</td><td>静かだった</td><td></td></tr>
-<tr><td>Past neg.</td><td>静かじゃなかった</td><td></td></tr>
-<tr><td>Adverb</td><td>静かに</td><td>静かに話す</td></tr>
-<tr><td>Te-form</td><td>静かで</td><td>静かで居心地がいい</td></tr>
-<tr><td>Conditional</td><td>静かなら(ば)</td><td></td></tr>
-<tr><td>Noun form</td><td>静かさ</td><td></td></tr>
-</table>
-<h3>Degrees of comparison</h3>
-<table>
-<tr><th></th><th>い-adj</th><th>な-adj</th></tr>
-<tr><td>More</td><td>もっと高い</td><td>もっと静かな</td></tr>
-<tr><td>A is more than B</td><td colspan="2">AはBより高い</td></tr>
-<tr><td>Most</td><td colspan="2">一番高い・最も静かだ</td></tr>
-<tr><td>As … as</td><td colspan="2">AはBと同じくらい高い</td></tr>
-</table>
-]] .. _XHTML_TAIL
+<p class="note">⚠ Ambiguous: 切る (kiru) is 五段; 着る (kiru) is 一段. Same sound, different type!</p>
 
+<h3>ない形 — Negative</h3>
+<p class="use">Use: negate an action. "do not / does not do X"</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>change final vowel to あ-row + ない<br/><span class="note">く→か　ぐ→が　す→さ　つ→た<br/>ぬ→な　ぶ→ば　む→ま　る→ら　う→わ</span></td><td>書く→書かない<br/>買う→買わない<br/>切る→切らない</td></tr>
+<tr><td>一段</td><td>remove る + ない</td><td>食べる→食べない<br/>見る→見ない</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→しない<br/>くる→こない</td></tr>
+</table>
+<p class="note">Past negative: ない → なかった (e.g. 書かなかった、食べなかった)</p>
+
+<h3>た形 — Past tense</h3>
+<p class="use">Use: past actions and events. "did X / X happened"</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>same stem as て-form, replace て→た / で→だ<br/><span class="note">く→いた　ぐ→いだ　す→した<br/>つ/う/る→った　ぬ/ぶ/む→んだ</span></td><td>書く→書いた<br/>飲む→飲んだ<br/>話す→話した</td></tr>
+<tr><td>一段</td><td>remove る + た</td><td>食べる→食べた<br/>見る→見た</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→した<br/>くる→きた</td></tr>
+</table>
+<p class="note">※ 行く (いく) is irregular: 行く→行った (not 行いた)</p>
+
+<h3>て形 — Te-form</h3>
+<p class="use">Use: connect actions in sequence ("and then"), requests (〜てください), ongoing state (〜ている), permission (〜てもいい), prohibition (〜てはだめ), and many compound patterns.</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>く→いて　ぐ→いで　す→して<br/>つ/う/る→って　ぬ/ぶ/む→んで</td><td>書く→書いて<br/>買う→買って<br/>飲む→飲んで</td></tr>
+<tr><td>一段</td><td>remove る + て</td><td>食べる→食べて<br/>見る→見て</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→して<br/>くる→きて</td></tr>
+</table>
+<p class="note">※ 行く (いく) is irregular: 行く→行って (not 行いて)</p>
+
+<h3>ます形 — Polite form</h3>
+<p class="use">Use: polite/formal register, used with teachers, strangers, in work contexts. The stem (without ます) is used in compound verbs (〜たい、〜やすい、〜にくい…)</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>change to い-row + ます<br/><span class="note">く→き　ぐ→ぎ　す→し　つ→ち<br/>ぬ→に　ぶ→び　む→み　る→り　う→い</span></td><td>書く→書きます<br/>飲む→飲みます<br/>買う→買います</td></tr>
+<tr><td>一段</td><td>remove る + ます</td><td>食べる→食べます<br/>見る→見ます</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→します<br/>くる→きます</td></tr>
+</table>
+
+<h3>〜たい — Want to do</h3>
+<p class="use">Use: express desire to do something. "want to do X". Conjugates like an い-adjective.</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>ます-stem + たい</td><td>書く→書きたい<br/>飲む→飲みたい</td></tr>
+<tr><td>一段</td><td>remove る + たい</td><td>食べる→食べたい</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→したい<br/>くる→きたい</td></tr>
+</table>
+<p class="note">Past: たかった　Neg: たくない　"I didn't want to": たくなかった</p>
+
+<h3>可能形 — Potential</h3>
+<p class="use">Use: "can / be able to do X". Object often marked with が instead of を in natural speech.</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>change to え-row + る</td><td>書く→書ける　読む→読める<br/>話す→話せる　買う→買える</td></tr>
+<tr><td>一段</td><td>remove る + られる<br/><span class="note">(casual: just + れる, called ら抜き言葉)</span></td><td>食べる→食べられる / 食べれる<br/>見る→見られる / 見れる</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→できる<br/>くる→こられる</td></tr>
+</table>
+
+<h3>受身形 — Passive</h3>
+<p class="use">Use: (1) passive voice "X is done / was done", (2) nuisance passive — something happened to the subject against their will (迷惑の受身): 雨に降られた = "I got rained on".</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>same stem as negative + れる</td><td>書く→書かれる<br/>飲む→飲まれる</td></tr>
+<tr><td>一段</td><td>remove る + られる</td><td>食べる→食べられる<br/>見る→見られる</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→される<br/>くる→こられる</td></tr>
+</table>
+
+<h3>使役形 — Causative</h3>
+<p class="use">Use: "make someone do X" (compulsion) or "let someone do X" (permission), depending on context.</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>same stem as negative + せる</td><td>書く→書かせる<br/>飲む→飲ませる</td></tr>
+<tr><td>一段</td><td>remove る + させる</td><td>食べる→食べさせる<br/>見る→見させる</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→させる<br/>くる→こさせる</td></tr>
+</table>
+<p class="note">Causative-passive (made to do): 書かせられる → 書かされる (contracted)</p>
+
+<h3>意向形 — Volitional</h3>
+<p class="use">Use: (1) "Let's do X" — invitation. (2) "I'll do X / I intend to" — expressing the speaker's will. Used in 〜ようとする (try to), 〜ようにする (make effort to).</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>change to お-row + う</td><td>書く→書こう　飲む→飲もう<br/>話す→話そう　買う→買おう</td></tr>
+<tr><td>一段</td><td>remove る + よう</td><td>食べる→食べよう<br/>見る→見よう</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→しよう<br/>くる→こよう</td></tr>
+</table>
+
+<h3>命令形 — Imperative</h3>
+<p class="use">Use: direct commands. Blunt/rude in everyday speech. Common in manga action scenes, sports, military. Polite alternative: て-form + ください.</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>change to え-row</td><td>書く→書け　飲む→飲め<br/>話す→話せ　買う→買え</td></tr>
+<tr><td>一段</td><td>remove る + ろ (literary: よ)</td><td>食べる→食べろ　見る→見ろ<br/>(literary: 食べよ)</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→しろ (literary: せよ)<br/>くる→こい</td></tr>
+</table>
+
+<h3>条件形 — Conditional</h3>
+<p class="use">Two main types with different nuance:</p>
+<p><b>〜ば</b> — hypothetical / general condition. "If X (were to happen), then Y."</p>
+<table>
+<tr><th>Type</th><th>Rule</th><th>Example</th></tr>
+<tr><td>五段</td><td>change to え-row + ば</td><td>書く→書けば　飲む→飲めば</td></tr>
+<tr><td>一段</td><td>remove る + れば</td><td>食べる→食べれば　見る→見れば</td></tr>
+<tr><td>する/くる</td><td>irregular</td><td>する→すれば　くる→くれば</td></tr>
+</table>
+<p><b>〜たら</b> — concrete / sequential. "When / after X happens, Y." Also used for completed condition.</p>
+<p class="note">Formation: た-form + ら → 書いたら・食べたら・したら・きたら</p>
+<p><b>〜と</b> — natural consequence / automatic result. "Whenever X, Y always follows." (not for intentions/requests)</p>
+<p class="note">Formation: dictionary form + と → 春になると桜が咲く</p>
+]=] .. _XHTML_TAIL
+
+-- ── Adjectives ─────────────────────────────────────────────────────────────
+local _REF_ADJ_HTML = _REF_HEAD .. [=[
+<h2>形容詞 · Adjectives</h2>
+
+<h3>Types at a glance</h3>
+<table>
+<tr><th>Type</th><th>Ending</th><th>Before noun</th><th>Examples</th></tr>
+<tr><td><b>い-adjectives</b></td><td>-い</td><td>高い山</td><td>高い・安い・大きい・小さい・いい</td></tr>
+<tr><td><b>な-adjectives</b></td><td>-な (attr.) / -だ (pred.)</td><td>静かな部屋</td><td>静か・好き・元気・きれい・上手</td></tr>
+</table>
+<p class="note">⚠ きれい and きらい look like い-adjectives but are な-adjectives.</p>
+
+<h3>い-adjectives (高い / takai)</h3>
+<table>
+<tr><th>Form</th><th>Rule</th><th>高い</th><th>Use</th></tr>
+<tr><td>Plain present</td><td>—</td><td>高い</td><td>高い山だ "It's an expensive mountain"</td></tr>
+<tr><td>Negative</td><td>い → くない</td><td>高くない</td><td>"not expensive"</td></tr>
+<tr><td>Past</td><td>い → かった</td><td>高かった</td><td>"was expensive"</td></tr>
+<tr><td>Past neg.</td><td>い → くなかった</td><td>高くなかった</td><td>"was not expensive"</td></tr>
+<tr><td>Adverb</td><td>い → く</td><td>高く</td><td>高く飛ぶ "fly high"</td></tr>
+<tr><td>Te-form</td><td>い → くて</td><td>高くて</td><td>高くて買えない "too expensive to buy"</td></tr>
+<tr><td>Conditional -ば</td><td>い → ければ</td><td>高ければ</td><td>高ければ買わない "if expensive, won't buy"</td></tr>
+<tr><td>Noun form</td><td>い → さ</td><td>高さ</td><td>"height / expensiveness"</td></tr>
+<tr><td>Polite</td><td>い → いです</td><td>高いです</td><td>formal register</td></tr>
+</table>
+<p class="note">⚠ いい/よい (good) is irregular: neg.→よくない · past→よかった · adv.→よく · cond.→よければ. Always use よ- for conjugations, never いく-.</p>
+
+<h3>な-adjectives (静か / shizuka)</h3>
+<table>
+<tr><th>Form</th><th>Rule</th><th>静か</th><th>Use</th></tr>
+<tr><td>Attributive</td><td>+ な</td><td>静かな</td><td>静かな場所 "a quiet place"</td></tr>
+<tr><td>Predicative</td><td>+ だ</td><td>静かだ</td><td>"it is quiet"</td></tr>
+<tr><td>Negative</td><td>+ じゃない / ではない</td><td>静かじゃない</td><td>ではない is formal</td></tr>
+<tr><td>Past</td><td>+ だった</td><td>静かだった</td><td>"it was quiet"</td></tr>
+<tr><td>Past neg.</td><td>+ じゃなかった</td><td>静かじゃなかった</td><td>"it was not quiet"</td></tr>
+<tr><td>Adverb</td><td>+ に</td><td>静かに</td><td>静かに話す "speak quietly"</td></tr>
+<tr><td>Te-form</td><td>+ で</td><td>静かで</td><td>静かで快適だ "quiet and comfortable"</td></tr>
+<tr><td>Conditional</td><td>+ なら(ば)</td><td>静かなら</td><td>"if it's quiet"</td></tr>
+<tr><td>Noun form</td><td>+ さ</td><td>静かさ</td><td>"quietness"</td></tr>
+<tr><td>Polite</td><td>+ です</td><td>静かです</td><td>formal register</td></tr>
+</table>
+
+<h3>Comparison</h3>
+<table>
+<tr><th>Meaning</th><th>Pattern</th><th>Example</th></tr>
+<tr><td>More (comparative)</td><td>AはBより＋adj</td><td>東京は大阪より大きい</td></tr>
+<tr><td>Most (superlative)</td><td>〜の中で一番＋adj</td><td>クラスの中で一番高い</td></tr>
+<tr><td>As … as</td><td>AはBと同じくらい＋adj</td><td>猫は犬と同じくらい可愛い</td></tr>
+<tr><td>Not as … as</td><td>AはBほど＋adj+くない</td><td>東京は大阪ほど安くない</td></tr>
+</table>
+
+<h3>Adjective + なる / する</h3>
+<table>
+<tr><th>Pattern</th><th>Meaning</th><th>Example</th></tr>
+<tr><td>い-adj: く + なる</td><td>become [adj]</td><td>寒くなる "become cold"</td></tr>
+<tr><td>な-adj: に + なる</td><td>become [adj]</td><td>元気になる "become healthy"</td></tr>
+<tr><td>い-adj: く + する</td><td>make [adj]</td><td>部屋を暖かくする</td></tr>
+<tr><td>な-adj: に + する</td><td>make [adj]</td><td>部屋を静かにする</td></tr>
+</table>
+]=] .. _XHTML_TAIL
+
+-- ── Particles & grammar ────────────────────────────────────────────────────
 local _REF_PARTICLES_HTML = _REF_HEAD .. [[
 <h2>助詞・文法 · Particles &amp; Key Grammar</h2>
 <h3>Core particles</h3>
 <table>
 <tr><th>Particle</th><th>Function</th><th>Example</th></tr>
-<tr><td>は (wa)</td><td>Topic marker</td><td>私は学生だ</td></tr>
-<tr><td>が (ga)</td><td>Subject / emphasis</td><td>猫が好きだ</td></tr>
-<tr><td>を (wo)</td><td>Direct object</td><td>りんごを食べる</td></tr>
-<tr><td>に (ni)</td><td>Direction, location, time, indirect obj.</td><td>学校に行く</td></tr>
-<tr><td>で (de)</td><td>Location of action, means/tool</td><td>図書館で読む</td></tr>
-<tr><td>へ (e)</td><td>Direction (softer than に)</td><td>東京へ行く</td></tr>
-<tr><td>の (no)</td><td>Possession, noun modifier</td><td>私の本</td></tr>
-<tr><td>と (to)</td><td>And (exhaustive), with, quotation</td><td>猫と犬、「行く」と言った</td></tr>
-<tr><td>か (ka)</td><td>Question, or</td><td>行くか？・AかB</td></tr>
-<tr><td>も (mo)</td><td>Also, too, even</td><td>私も行く</td></tr>
-<tr><td>だけ</td><td>Only, just</td><td>一つだけ</td></tr>
-<tr><td>しか</td><td>Nothing but (+ negative)</td><td>一つしかない</td></tr>
-<tr><td>から</td><td>From, because</td><td>駅から歩く・寒いから…</td></tr>
-<tr><td>まで</td><td>Until, up to</td><td>駅まで歩く</td></tr>
-<tr><td>より</td><td>Than, from (formal)</td><td>AよりBが好き</td></tr>
+<tr><td>は (wa)</td><td>Topic marker — introduces what the sentence is about. Contrasts with other things.</td><td>私は学生だ</td></tr>
+<tr><td>が (ga)</td><td>Subject marker — identifies who/what performs the action or possesses a quality. Also used for emphasis and in subordinate clauses.</td><td>猫が好きだ・彼が来た</td></tr>
+<tr><td>を (wo)</td><td>Direct object — marks the receiver of the action.</td><td>りんごを食べる</td></tr>
+<tr><td>に (ni)</td><td>Direction, destination, time point, location of existence, indirect object, purpose of movement.</td><td>学校に行く・3時に起きる・机の上にある</td></tr>
+<tr><td>で (de)</td><td>Location where action takes place; means/tool/method; reason (formal).</td><td>図書館で読む・バスで行く</td></tr>
+<tr><td>へ (e)</td><td>Direction toward a destination. Softer/more literary than に.</td><td>東京へ行く</td></tr>
+<tr><td>の (no)</td><td>Possession; noun modifier (like "of"); nominalizer (turns clause into noun).</td><td>私の本・行くのが好き</td></tr>
+<tr><td>と (to)</td><td>And (exhaustive list); accompaniment (with); quotation marker.</td><td>猫と犬・友達と行く・「行く」と言った</td></tr>
+<tr><td>か (ka)</td><td>Question marker (sentence-final); or (between options).</td><td>行くか？・AかB</td></tr>
+<tr><td>も (mo)</td><td>Also, too, even; replaces は/が/を in meaning "X too".</td><td>私も行く・何もない</td></tr>
+<tr><td>だけ</td><td>Only, just, nothing more than.</td><td>一つだけ・これだけ</td></tr>
+<tr><td>しか</td><td>Nothing but, only — always with negative verb.</td><td>一つしかない (only one exists)</td></tr>
+<tr><td>から</td><td>From (origin, time start); because/since (cause).</td><td>駅から歩く・寒いから行かない</td></tr>
+<tr><td>まで</td><td>Until, up to (time or place limit).</td><td>5時まで・駅まで歩く</td></tr>
+<tr><td>より</td><td>Than (comparison); from (formal/literary).</td><td>AよりBが好き</td></tr>
+<tr><td>ので</td><td>Because, since — soft/objective reason. More polite than から.</td><td>雨なので行かない</td></tr>
+<tr><td>のに</td><td>Even though, despite — expresses surprise or disappointment.</td><td>頑張ったのに負けた</td></tr>
 </table>
 <h3>Key sentence patterns</h3>
 <table>
 <tr><th>Pattern</th><th>Meaning</th><th>Example</th></tr>
-<tr><td>〜ている</td><td>ongoing / resultant state</td><td>食べている・結婚している</td></tr>
-<tr><td>〜ていた</td><td>was doing / had done</td><td>走っていた</td></tr>
-<tr><td>〜てみる</td><td>try doing</td><td>食べてみる</td></tr>
-<tr><td>〜てしまう</td><td>end up doing / regret</td><td>忘れてしまった</td></tr>
-<tr><td>〜てもいい</td><td>it's ok to do</td><td>行ってもいい</td></tr>
-<tr><td>〜てはいけない</td><td>must not do</td><td>入ってはいけない</td></tr>
-<tr><td>〜なければならない</td><td>must do</td><td>行かなければならない</td></tr>
-<tr><td>〜かもしれない</td><td>might, perhaps</td><td>雨かもしれない</td></tr>
+<tr><td>〜ている</td><td>ongoing action / resultant state</td><td>食べている・結婚している</td></tr>
+<tr><td>〜ていた</td><td>was doing / had done (at that time)</td><td>寝ていた</td></tr>
+<tr><td>〜てみる</td><td>try doing (to see what happens)</td><td>食べてみる</td></tr>
+<tr><td>〜てしまう</td><td>end up doing; done completely (sometimes regret)</td><td>忘れてしまった</td></tr>
+<tr><td>〜てもいい</td><td>it's ok to do, permission</td><td>行ってもいい</td></tr>
+<tr><td>〜てはいけない</td><td>must not do, prohibition</td><td>入ってはいけない</td></tr>
+<tr><td>〜なければならない</td><td>must do, obligation</td><td>行かなければならない</td></tr>
+<tr><td>〜なくてもいい</td><td>don't have to do</td><td>来なくてもいい</td></tr>
+<tr><td>〜かもしれない</td><td>might, perhaps, possibility</td><td>雨かもしれない</td></tr>
 <tr><td>〜と思う</td><td>I think that…</td><td>行くと思う</td></tr>
-<tr><td>〜ようにする</td><td>make effort to</td><td>早く寝るようにする</td></tr>
-<tr><td>〜ことができる</td><td>can, be able to</td><td>泳ぐことができる</td></tr>
-<tr><td>〜たことがある</td><td>have (ever) done</td><td>食べたことがある</td></tr>
-<tr><td>〜ながら</td><td>while doing</td><td>音楽を聴きながら</td></tr>
-<tr><td>〜ので</td><td>because (soft)</td><td>雨なので…</td></tr>
-<tr><td>〜のに</td><td>even though</td><td>頑張ったのに…</td></tr>
+<tr><td>〜ようとする</td><td>try to do (make attempt)</td><td>逃げようとする</td></tr>
+<tr><td>〜ようにする</td><td>make effort to, try to habitually</td><td>早く寝るようにする</td></tr>
+<tr><td>〜ことができる</td><td>can, be able to do</td><td>泳ぐことができる</td></tr>
+<tr><td>〜たことがある</td><td>have (ever) done (experience)</td><td>食べたことがある</td></tr>
+<tr><td>〜ながら</td><td>while doing (simultaneous actions)</td><td>音楽を聴きながら勉強する</td></tr>
+<tr><td>〜ばかり</td><td>just did; doing nothing but</td><td>来たばかり・食べてばかりいる</td></tr>
+<tr><td>〜はずだ</td><td>should be, expected to be</td><td>彼は来るはずだ</td></tr>
+<tr><td>〜そうだ</td><td>looks like it will / I heard that</td><td>雨が降りそうだ・行くそうだ</td></tr>
+<tr><td>〜らしい</td><td>seems like, apparently (evidence-based)</td><td>彼は忙しいらしい</td></tr>
+<tr><td>〜わけだ</td><td>that explains it / that means (logical conclusion)</td><td>だからそうなるわけだ</td></tr>
 </table>
 ]] .. _XHTML_TAIL
 
@@ -1269,6 +1390,25 @@ local function yomitsuInterceptor(scope, text, ...)
             dict       = _("History"),
             word       = word,
             definition = buildHistoryHtml(word),
+            is_html    = true,
+        })
+
+        table.insert(results, {
+            dict       = _("Verbs"),
+            word       = word,
+            definition = _REF_VERBS_HTML,
+            is_html    = true,
+        })
+        table.insert(results, {
+            dict       = _("Adjectives"),
+            word       = word,
+            definition = _REF_ADJ_HTML,
+            is_html    = true,
+        })
+        table.insert(results, {
+            dict       = _("Particles"),
+            word       = word,
+            definition = _REF_PARTICLES_HTML,
             is_html    = true,
         })
 
