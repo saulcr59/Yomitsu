@@ -304,21 +304,33 @@ def load_genius():
     )
 
 
+def _kata_to_hira(text: str) -> str:
+    return "".join(chr(ord(c) - 0x60) if "ァ" <= c <= "ヶ" else c for c in text)
+
+
 def load_freq_jpdb():
     logger.info("Cargando JPDB frequency...")
     path = "./dictionaries/JPDB_v2.2_Frequency_Kana_2024-10-13/term_meta_bank_1.json"
     try:
         with open(path, "r", encoding="utf-8") as f:
-            for entry in json.load(f):
-                word = entry[0]
-                meta = entry[2]
-                freq_data = meta.get("frequency", {})
-                display = str(freq_data.get("displayValue", ""))
-                if "㋕" not in display:
-                    val = freq_data.get("value")
-                    if val is not None:
-                        if word not in FREQ_JPDB or val < FREQ_JPDB[word]:
-                            FREQ_JPDB[word] = val
+            data = json.load(f)
+        for entry in data:
+            word = _kata_to_hira(entry[0])
+            meta = entry[2]
+            val = None
+            if isinstance(meta, dict):
+                val = meta.get("value")           # {'value': N, 'displayValue': '...'} — JPDB format
+                if val is None:
+                    freq = meta.get("frequency")
+                    if isinstance(freq, dict):
+                        val = freq.get("value")   # nested {'frequency': {'value': N}} fallback
+                    elif isinstance(freq, int):
+                        val = freq
+            elif isinstance(meta, int):
+                val = meta
+            if val is not None:
+                if word not in FREQ_JPDB or val < FREQ_JPDB[word]:
+                    FREQ_JPDB[word] = val
         logger.info(f"JPDB frequency cargado: {len(FREQ_JPDB)} entradas.")
     except Exception as e:
         logger.error(f"Error cargando JPDB frequency: {e}")
