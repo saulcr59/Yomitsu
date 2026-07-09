@@ -302,18 +302,72 @@ async def analyze_grammar_stream_ep(request: AnalyzeAiRequest):
     return StreamingResponse(generate(), media_type="text/plain")
 
 
+def _split_page_sentences(text: str) -> list[str]:
+    """Split page text into individual sentences for translation pre-warming.
+    Splits on Japanese sentence-ending punctuation and on newlines (speech-bubble
+    boundaries in Mokuro output)."""
+    parts = re.split(r'(?<=[。！？\n])|(?<=\n)', text)
+    seen: set[str] = set()
+    result = []
+    for p in parts:
+        s = p.strip()
+        if s and s not in seen:
+            seen.add(s)
+            result.append(s)
+    return result
+
+
+async def _prewarm_sentence_translation(sentence: str) -> None:
+    """Translate one sentence and store the result in _trans_cache.
+    Called as a background task; errors are silently logged."""
+    if _trans_cache.get(sentence) is not None:
+        return
+    payload = {
+        "context_phrase": sentence,
+        "target_word":    "",
+        "original_word":  "",
+        "part_of_speech": "",
+        "page_context":   "",
+    }
+    chunks: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            async with client.stream("POST", TRANSLATOR_STREAM_URL, json=payload) as resp:
+                async for chunk in resp.aiter_text():
+                    if chunk:
+                        chunks.append(chunk)
+        if chunks:
+            _trans_cache.set(sentence, "".join(chunks))
+            logger.info(f"[TRANS-PREWARM] '{sentence[:50]}'")
+    except Exception as e:
+        logger.error(f"[TRANS-PREWARM] '{sentence[:30]}': {e}")
+
+
 @app.post("/warm-page")
 async def warm_page_ep(request: WarmPageRequest):
+    import asyncio
+
+    # 1. Pre-warm dict cache (fast, awaited so we can report count)
+    dict_warmed = 0
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.post(f"{_DICT_BASE}/warm-page", json={"text": request.text})
             res.raise_for_status()
-            result = res.json()
-            logger.info(f"[WARM-PAGE] {result.get('warmed', 0)} tokens precargados")
-            return result
+            dict_warmed = res.json().get("warmed", 0)
     except Exception as e:
-        logger.error(f"[WARM-PAGE] {e}")
-        return {"warmed": 0}
+        logger.error(f"[WARM-PAGE-DICT] {e}")
+
+    # 2. Pre-warm translation cache for every unique sentence on the page.
+    #    Launched as background tasks so this endpoint returns immediately.
+    sentences = _split_page_sentences(request.text)
+    queued = 0
+    for sentence in sentences:
+        if _trans_cache.get(sentence) is None:
+            asyncio.create_task(_prewarm_sentence_translation(sentence))
+            queued += 1
+
+    logger.info(f"[WARM-PAGE] dict={dict_warmed} trans_queued={queued}")
+    return {"dict_warmed": dict_warmed, "trans_queued": queued}
 
 
 @app.post("/analyze-dict")
