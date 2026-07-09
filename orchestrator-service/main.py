@@ -442,13 +442,13 @@ async def ask_stream_ep(request: AskRequest):
         return StreamingResponse(_no_key(), media_type="text/plain")
 
     system_prompt = (
-        "Eres un tutor de japonés. El estudiante está leyendo en japonés y tiene una pregunta "
-        "sobre una frase o palabra. Responde de forma concisa y clara en español."
+        "You are a Japanese language tutor. The student is reading Japanese and has a question "
+        "about a sentence or word. Answer concisely and clearly in English."
     )
-    ctx_part = f"Frase: {request.context_phrase}" if request.context_phrase else ""
-    word_part = f"Palabra: {request.target_word}" if request.target_word else ""
-    page_part = f"Contexto de página:\n{request.page_context}" if request.page_context else ""
-    user_msg = "\n".join(p for p in [ctx_part, word_part, page_part, f"Pregunta: {request.question}"] if p)
+    ctx_part  = f"Sentence: {request.context_phrase}" if request.context_phrase else ""
+    word_part = f"Word: {request.target_word}" if request.target_word else ""
+    page_part = f"Page context:\n{request.page_context}" if request.page_context else ""
+    user_msg  = "\n".join(p for p in [ctx_part, word_part, page_part, f"Question: {request.question}"] if p)
 
     async def gen():
         try:
