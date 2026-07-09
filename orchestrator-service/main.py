@@ -1,7 +1,9 @@
 import json
 import os
+import re
 import httpx
 import logging
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -50,6 +52,70 @@ DICTIONARY_SERVICE_URL   = f"{_DICT_BASE}/extract-word"
 TRANSLATOR_STREAM_URL    = f"{_TRANSLATOR_BASE}/stream-translate"
 GRAMMAR_STREAM_URL       = f"{_GRAMMAR_BASE}/stream-grammar"
 
+# ---------------------------------------------------------------------------
+# Sentence-level LRU cache
+# ---------------------------------------------------------------------------
+
+_CACHE_MAX = 100
+
+
+class _LRUCache:
+    def __init__(self, maxsize: int = _CACHE_MAX):
+        self._data: OrderedDict = OrderedDict()
+        self._maxsize = maxsize
+
+    def get(self, key: str):
+        if key in self._data:
+            self._data.move_to_end(key)
+            return self._data[key]
+        return None
+
+    def set(self, key: str, value) -> None:
+        if key in self._data:
+            self._data.move_to_end(key)
+        self._data[key] = value
+        if len(self._data) > self._maxsize:
+            self._data.popitem(last=False)
+
+
+_trans_cache = _LRUCache()
+_gram_cache  = _LRUCache()
+
+
+def _extract_sentence(context: str, target_word: str, original_word: str = "") -> str:
+    """Return the single sentence from context that contains the target word."""
+    parts = re.split(r'(?<=[。！？])', context)
+    sentences: list[str] = []
+    for part in parts:
+        sentences.extend(part.split('\n'))
+    candidates = [w for w in (target_word, original_word) if w]
+    for sentence in sentences:
+        s = sentence.strip()
+        if s and any(w in s for w in candidates):
+            return s
+    return context.strip()
+
+
+def _remap_star(grammar_text: str, old_target: str, new_target: str) -> str:
+    """Move the ★ marker from old_target's DESGLOSE entry to new_target's."""
+    if old_target == new_target:
+        return grammar_text
+    lines = grammar_text.split('\n')
+    result = []
+    star_placed = False
+    for line in lines:
+        if line.startswith('★ '):
+            line = '- ' + line[2:]
+        if not star_placed and line.startswith('- ') and new_target in line:
+            line = '★ ' + line[2:]
+            star_placed = True
+        result.append(line)
+    return '\n'.join(result)
+
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
 
 class LookUpAndTranslateRequest(BaseModel):
     raw_text: str
@@ -71,6 +137,10 @@ class PageContextRequest(BaseModel):
     manga_title: str = ""
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 async def _tokenize(context_phrase: str, user_selection: str, char_offset=None) -> tuple[str, str]:
     try:
         res = await _http_client.post(DICT_TOKENIZE_URL, json={
@@ -85,6 +155,10 @@ async def _tokenize(context_phrase: str, user_selection: str, char_offset=None) 
         logger.error(f"[TOKENIZE-ERROR] {e}")
         return "unknown", ""
 
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 @app.get("/health")
 async def health():
@@ -137,6 +211,15 @@ async def analyze_page_context(request: PageContextRequest):
 
 @app.post("/analyze-translation-stream")
 async def analyze_translation_stream_ep(request: AnalyzeAiRequest):
+    sentence = _extract_sentence(request.context_phrase, request.target_word, request.original_word)
+
+    cached = _trans_cache.get(sentence)
+    if cached is not None:
+        logger.info(f"[TRANS-HIT] '{sentence[:50]}'")
+        async def from_cache():
+            yield cached
+        return StreamingResponse(from_cache(), media_type="text/plain")
+
     trans_payload = {
         "context_phrase": request.context_phrase,
         "target_word":    request.target_word,
@@ -144,6 +227,7 @@ async def analyze_translation_stream_ep(request: AnalyzeAiRequest):
         "part_of_speech": request.part_of_speech,
         "page_context":   request.page_context,
     }
+    chunks: list[str] = []
 
     async def generate():
         try:
@@ -151,15 +235,32 @@ async def analyze_translation_stream_ep(request: AnalyzeAiRequest):
                 async with client.stream("POST", TRANSLATOR_STREAM_URL, json=trans_payload) as resp:
                     async for chunk in resp.aiter_text():
                         if chunk:
+                            chunks.append(chunk)
                             yield chunk
         except Exception as e:
             logger.error(f"[TRANS-STREAM-PROXY] {e}")
+        finally:
+            if chunks:
+                _trans_cache.set(sentence, "".join(chunks))
+                logger.info(f"[TRANS-CACHED] '{sentence[:50]}'")
 
     return StreamingResponse(generate(), media_type="text/plain")
 
 
 @app.post("/analyze-grammar-stream")
 async def analyze_grammar_stream_ep(request: AnalyzeAiRequest):
+    sentence = _extract_sentence(request.context_phrase, request.target_word, request.original_word)
+
+    cached = _gram_cache.get(sentence)
+    if cached is not None:
+        logger.info(f"[GRAM-HIT] '{request.target_word}' in '{sentence[:50]}'")
+        text = _remap_star(cached["text"], cached["target_word"], request.target_word)
+        meta_str = cached["meta"]
+        async def from_cache():
+            yield f"\x01{meta_str}\x01\n"
+            yield text
+        return StreamingResponse(from_cache(), media_type="text/plain")
+
     grammar_payload = {
         "context_phrase": request.context_phrase,
         "target_word":    request.target_word,
@@ -167,19 +268,32 @@ async def analyze_grammar_stream_ep(request: AnalyzeAiRequest):
         "part_of_speech": request.part_of_speech,
         "page_context":   request.page_context,
     }
+    chunks: list[str] = []
+    meta_str: str = ""
 
     async def generate():
+        nonlocal meta_str
         _, romaji_sentence = await _tokenize(request.context_phrase, request.target_word)
         meta = {"romaji": romaji_sentence, "model": GRAMMAR_MODEL}
-        yield f"\x01{json.dumps(meta, ensure_ascii=False)}\x01\n"
+        meta_str = json.dumps(meta, ensure_ascii=False)
+        yield f"\x01{meta_str}\x01\n"
         try:
             async with httpx.AsyncClient(timeout=35.0) as client:
                 async with client.stream("POST", GRAMMAR_STREAM_URL, json=grammar_payload) as resp:
                     async for chunk in resp.aiter_text():
                         if chunk:
+                            chunks.append(chunk)
                             yield chunk
         except Exception as e:
             logger.error(f"[GRAM-STREAM-PROXY] {e}")
+        finally:
+            if chunks and meta_str:
+                _gram_cache.set(sentence, {
+                    "meta":        meta_str,
+                    "text":        "".join(chunks),
+                    "target_word": request.target_word,
+                })
+                logger.info(f"[GRAM-CACHED] '{request.target_word}' in '{sentence[:50]}'")
 
     return StreamingResponse(generate(), media_type="text/plain")
 
