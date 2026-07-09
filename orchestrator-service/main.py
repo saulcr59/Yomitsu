@@ -130,6 +130,7 @@ class AnalyzeAiRequest(BaseModel):
     original_word: str
     part_of_speech: str
     page_context: str = ""
+    response_language: str = "English"
 
 
 class PageContextRequest(BaseModel):
@@ -140,6 +141,7 @@ class PageContextRequest(BaseModel):
 
 class WarmPageRequest(BaseModel):
     text: str
+    response_language: str = "English"
 
 
 class AskRequest(BaseModel):
@@ -147,6 +149,7 @@ class AskRequest(BaseModel):
     context_phrase: str
     target_word: str = ""
     page_context: str = ""
+    response_language: str = "English"
 
 
 # ---------------------------------------------------------------------------
@@ -274,11 +277,12 @@ async def analyze_grammar_stream_ep(request: AnalyzeAiRequest):
         return StreamingResponse(from_cache(), media_type="text/plain")
 
     grammar_payload = {
-        "context_phrase": request.context_phrase,
-        "target_word":    request.target_word,
-        "original_word":  request.original_word,
-        "part_of_speech": request.part_of_speech,
-        "page_context":   request.page_context,
+        "context_phrase":    request.context_phrase,
+        "target_word":       request.target_word,
+        "original_word":     request.original_word,
+        "part_of_speech":    request.part_of_speech,
+        "page_context":      request.page_context,
+        "response_language": request.response_language,
     }
     chunks: list[str] = []
     meta_str: str = ""
@@ -325,16 +329,17 @@ def _split_page_sentences(text: str) -> list[str]:
     return result
 
 
-async def _prewarm_sentence_grammar(sentence: str, target_word: str, part_of_speech: str) -> None:
+async def _prewarm_sentence_grammar(sentence: str, target_word: str, part_of_speech: str, response_language: str = "English") -> None:
     """Analyze grammar for one sentence and store in _gram_cache (romaji included)."""
     if _gram_cache.get(sentence) is not None:
         return
     grammar_payload = {
-        "context_phrase": sentence,
-        "target_word":    target_word,
-        "original_word":  "",
-        "part_of_speech": part_of_speech,
-        "page_context":   "",
+        "context_phrase":    sentence,
+        "target_word":       target_word,
+        "original_word":     "",
+        "part_of_speech":    part_of_speech,
+        "page_context":      "",
+        "response_language": response_language,
     }
     _, romaji_sentence = await _tokenize(sentence, target_word)
     meta_str = json.dumps({"romaji": romaji_sentence, "model": GRAMMAR_MODEL}, ensure_ascii=False)
@@ -409,7 +414,7 @@ async def warm_page_ep(request: WarmPageRequest):
             queued_trans += 1
         if _gram_cache.get(sentence) is None:
             asyncio.create_task(_prewarm_sentence_grammar(
-                sentence, item["target_word"], item["part_of_speech"]))
+                sentence, item["target_word"], item["part_of_speech"], request.response_language))
             queued_gram += 1
 
     logger.info(f"[WARM-PAGE] dict={dict_warmed} trans={queued_trans} gram={queued_gram}")
@@ -443,7 +448,7 @@ async def ask_stream_ep(request: AskRequest):
 
     system_prompt = (
         "You are a Japanese language tutor. The student is reading Japanese and has a question "
-        "about a sentence or word. Answer concisely and clearly in English."
+        f"about a sentence or word. Answer concisely and clearly in {request.response_language}."
     )
     ctx_part  = f"Sentence: {request.context_phrase}" if request.context_phrase else ""
     word_part = f"Word: {request.target_word}" if request.target_word else ""

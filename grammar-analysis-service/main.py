@@ -25,7 +25,7 @@ SYSTEM_PROMPT = """\
 You are an expert Japanese linguist. Analyze Japanese sentences with precision and didactic clarity: \
 explain what each element means, how it is formed, when to use it, and how it differs from alternatives.
 
-Always respond in English using exactly this structure, in this order:
+Always respond in {response_language} using exactly this structure, in this order:
 
 BREAKDOWN:
 - ELEMENT (reading, romaji) [Nx] — explanation
@@ -88,7 +88,8 @@ def _extract_sentence(context: str, target_word: str, original_word: str = "") -
     return context.strip()
 
 
-def _build_messages(sentence: str, target_word: str, part_of_speech: str, page_context: str = "") -> list:
+def _build_messages(sentence: str, target_word: str, part_of_speech: str, page_context: str = "", response_language: str = "English") -> list:
+    system = SYSTEM_PROMPT.replace("{response_language}", response_language)
     user_prompt = ""
     if page_context:
         user_prompt += f"Other text on this manga page (for context):\n{page_context}\n\n"
@@ -98,7 +99,7 @@ def _build_messages(sentence: str, target_word: str, part_of_speech: str, page_c
         "Analyze this sentence following the system schema."
     )
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system},
         {"role": "user",   "content": user_prompt},
     ]
 
@@ -109,6 +110,7 @@ class GrammarRequest(BaseModel):
     original_word: str = ""
     part_of_speech: str
     page_context: str = ""
+    response_language: str = "English"
 
 
 @app.get("/health")
@@ -124,7 +126,7 @@ async def analyze_grammar(request: GrammarRequest):
     try:
         response = await client.chat.completions.create(
             model=MODEL,
-            messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context),
+            messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context, request.response_language),
             max_tokens=1000,
             temperature=0.3,
         )
@@ -159,7 +161,7 @@ async def stream_grammar(request: GrammarRequest):
         try:
             response = await client.chat.completions.create(
                 model=MODEL,
-                messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context),
+                messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context, request.response_language),
                 max_tokens=1000,
                 temperature=0.3,
                 stream=True,

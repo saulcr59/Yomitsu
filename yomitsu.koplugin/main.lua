@@ -71,6 +71,19 @@ local _warmed_pages       = {}  -- pages already sent to /warm-page this navigat
 local _last_page_key      = nil -- resets _warmed_pages on page change
 local _show_trans_details = false  -- romaji+ES hidden by default; toggled by button
 
+-- Map KOReader locale (e.g. "es_ES") to a full language name for AI response prompts.
+local function _get_response_language()
+    local locale = G_reader_settings:readSetting("language") or "en"
+    local code   = locale:match("^(%a+)") or "en"
+    local map = {
+        es = "Spanish",  en = "English",   fr = "French",    de = "German",
+        pt = "Portuguese", it = "Italian", ja = "Japanese",  zh = "Chinese",
+        ko = "Korean",   ru = "Russian",   nl = "Dutch",     pl = "Polish",
+        sv = "Swedish",  tr = "Turkish",   ar = "Arabic",    ca = "Catalan",
+    }
+    return map[code] or "English"
+end
+
 local function _page_key(scope)
     local ui = scope and scope.ui
     if not ui then return nil end
@@ -1547,7 +1560,7 @@ local function yomitsuInterceptor(scope, text, ...)
             if warm_text and #warm_text > 1 then
                 _warmed_pages[cur_page_key] = true
                 async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
-                    json.encode({ text = warm_text }), nil, 30,
+                    json.encode({ text = warm_text, response_language = _get_response_language() }), nil, 30,
                     function(code, body)
                         logger.info("[YOMITSU] warm-page response: code=" .. tostring(code)
                             .. " body=" .. tostring(body and body:sub(1, 120)))
@@ -1559,11 +1572,12 @@ local function yomitsuInterceptor(scope, text, ...)
 
         -- Shared payload for both streaming requests
         local ok_ai, ai_payload = pcall(json.encode, {
-            context_phrase = context,
-            target_word    = word,
-            original_word  = original_word,
-            part_of_speech = pos,
-            page_context   = page_ctx,
+            context_phrase    = context,
+            target_word       = word,
+            original_word     = original_word,
+            part_of_speech    = pos,
+            page_context      = page_ctx,
+            response_language = _get_response_language(),
         })
         if not ok_ai or not ai_payload then return end
 
@@ -1629,10 +1643,11 @@ local function yomitsuInterceptor(scope, text, ...)
                 .. '<font color="#aaa"><i>Consultando AI...</i></font></p>'
             update_yomitsu_ia(rebuild_current())
             local ask_payload = json.encode({
-                question       = question,
-                context_phrase = context,
-                target_word    = word,
-                page_context   = page_ctx,
+                question          = question,
+                context_phrase    = context,
+                target_word       = word,
+                page_context      = page_ctx,
+                response_language = _get_response_language(),
             })
             local ask_buf = ""
             async_stream_post(_ACTIVE_HOST, _ACTIVE_PORT, "/ask-stream",
@@ -1922,8 +1937,30 @@ function Yomitsu:init()
     -- Replace the default layout so only navigation + Yomitsu buttons appear.
     if self.ui and self.ui.dictionary then
         self.ui.dictionary.default_layout = {
-            { "prev_dict", "yomitsu_toggle", "yomitsu_ask_ai", "next_dict" }
+            { "prev_dict", "yomitsu_font_dec", "yomitsu_toggle", "yomitsu_ask_ai", "yomitsu_font_inc", "next_dict" }
         }
+
+        self.ui.dictionary:addToDictButtons({
+            id       = "yomitsu_font_dec",
+            text     = "A-",
+            callback = function(dict_popup)
+                local sz = math.max(8, (dict_popup.dict_font_size or 20) - 2)
+                dict_popup.dict_font_size = sz
+                G_reader_settings:saveSetting("dict_font_size", sz)
+                pcall(function() dict_popup:update() end)
+            end,
+        })
+
+        self.ui.dictionary:addToDictButtons({
+            id       = "yomitsu_font_inc",
+            text     = "A+",
+            callback = function(dict_popup)
+                local sz = math.min(40, (dict_popup.dict_font_size or 20) + 2)
+                dict_popup.dict_font_size = sz
+                G_reader_settings:saveSetting("dict_font_size", sz)
+                pcall(function() dict_popup:update() end)
+            end,
+        })
 
         self.ui.dictionary:addToDictButtons({
             id        = "yomitsu_toggle",
