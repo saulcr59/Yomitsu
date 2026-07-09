@@ -67,7 +67,8 @@ local CACHE_MAX   = 50
 -- Page context cache keyed by "cbz_path:page_no" → GPT scene description.
 -- Populated in background after first word per page; used for all subsequent lookups.
 local _page_ctx_cache  = {}
-local _warmed_pages    = {}  -- pages already sent to /warm-page
+local _warmed_pages    = {}  -- pages already sent to /warm-page this navigation
+local _last_page_key   = nil -- resets _warmed_pages on page change
 
 local function _page_key(scope)
     local ui = scope and scope.ui
@@ -132,7 +133,7 @@ local function _mokuro_page_text(scope)
             or (type(block.text) == "string" and block.text) or ""
         if bt ~= "" then texts[#texts+1] = bt end
     end
-    return table.concat(texts, " | ")
+    return table.concat(texts, "\n")
 end
 
 local function _cache_get(key)
@@ -1512,19 +1513,37 @@ local function yomitsuInterceptor(scope, text, ...)
             local ok_ocr, ocr_text = pcall(_mokuro_page_text, scope)
             if ok_ocr and type(ocr_text) == "string" and ocr_text ~= "" then
                 _page_ctx_cache[cur_page_key] = ocr_text
-                logger.info("[YOMITSU] OCR página cacheado: " .. #ocr_text .. " chars")
+                logger.info("[YOMITSU] OCR cacheado: " .. #ocr_text .. "b key=" .. cur_page_key)
+            else
+                logger.warn("[YOMITSU] OCR vacío: ok=" .. tostring(ok_ocr)
+                    .. " text=" .. tostring(ocr_text and #ocr_text or "nil"))
             end
         end
         local page_ctx = (cur_page_key and _page_ctx_cache[cur_page_key]) or ""
 
-        -- On first lookup per page, warm the dict cache for all other words.
+        -- Any page navigation resets warm flags so returning to a page (or after a
+        -- server restart) always re-triggers warm-page.
+        if cur_page_key ~= _last_page_key then
+            _warmed_pages  = {}
+            _last_page_key = cur_page_key
+        end
+
+        -- On first lookup per page, warm the dict/AI caches for all words/sentences.
         -- Use Mokuro OCR text if available, otherwise the sentence context.
         if cur_page_key and not _warmed_pages[cur_page_key] then
             local warm_text = (page_ctx ~= "" and page_ctx) or context
+            logger.info("[YOMITSU] warm-page trigger: key=" .. tostring(cur_page_key)
+                .. " page_ctx=" .. #page_ctx .. "b context=" .. #context .. "b")
             if warm_text and #warm_text > 1 then
                 _warmed_pages[cur_page_key] = true
                 async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
-                    json.encode({ text = warm_text }), nil, 30, function() end)
+                    json.encode({ text = warm_text }), nil, 30,
+                    function(code, body)
+                        logger.info("[YOMITSU] warm-page response: code=" .. tostring(code)
+                            .. " body=" .. tostring(body and body:sub(1, 120)))
+                    end)
+            else
+                logger.warn("[YOMITSU] warm-page: no text available to warm")
             end
         end
 

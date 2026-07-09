@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -376,15 +377,15 @@ async def _prewarm_sentence_translation(sentence: str) -> None:
 
 @app.post("/warm-page")
 async def warm_page_ep(request: WarmPageRequest):
-    import asyncio
-
     # 1. Pre-warm dict cache (fast, awaited so we can report count)
+    dict_result = {}
     dict_warmed = 0
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.post(f"{_DICT_BASE}/warm-page", json={"text": request.text})
             res.raise_for_status()
-            dict_warmed = res.json().get("warmed", 0)
+            dict_result = res.json()
+            dict_warmed = dict_result.get("warmed", 0)
     except Exception as e:
         logger.error(f"[WARM-PAGE-DICT] {e}")
 
