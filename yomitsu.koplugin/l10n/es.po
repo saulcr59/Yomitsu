@@ -551,3 +551,9 @@ msgstr "Pasado"
 
 msgid "adjectives"
 msgstr "adjetivos"
+
+msgid "Ask AI about this phrase"
+msgstr "Pregunta al AI sobre esta frase"
+
+msgid "Send"
+msgstr "Enviar"

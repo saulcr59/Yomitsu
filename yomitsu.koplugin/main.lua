@@ -66,9 +66,10 @@ local CACHE_MAX   = 50
 
 -- Page context cache keyed by "cbz_path:page_no" → GPT scene description.
 -- Populated in background after first word per page; used for all subsequent lookups.
-local _page_ctx_cache  = {}
-local _warmed_pages    = {}  -- pages already sent to /warm-page this navigation
-local _last_page_key   = nil -- resets _warmed_pages on page change
+local _page_ctx_cache     = {}
+local _warmed_pages       = {}  -- pages already sent to /warm-page this navigation
+local _last_page_key      = nil -- resets _warmed_pages on page change
+local _show_trans_details = false  -- romaji+ES hidden by default; toggled by button
 
 local function _page_key(scope)
     local ui = scope and scope.ui
@@ -1177,7 +1178,8 @@ local function buildLoadingHtml(word, reading, frequency, count, kanji)
     return _XHTML_HEAD .. body .. _XHTML_TAIL
 end
 
--- Intermediate HTML: shows translation while grammar is still loading.
+-- Intermediate HTML: translation done, grammar still loading.
+-- Respects _show_trans_details for ES visibility.
 -- opts.hide_grammar = true → skip the "Generando desglose..." footer
 local function buildTranslationHtml(word, reading, ai, original_word, frequency, count, kanji, opts)
     opts = opts or {}
@@ -1186,10 +1188,6 @@ local function buildTranslationHtml(word, reading, ai, original_word, frequency,
     local freq_str = _build_freq_str(frequency)
 
     local source = ai.source_sentence or ""
-    local translation = (ai.translation_and_nuance or _("No analysis available"))
-        :gsub("^%s+", ""):gsub("%s+$", "")
-    translation = _html_esc(translation):gsub("\n", "<br/>")
-
     local source_html = ""
     if source ~= "" then
         local esc = _html_esc(source)
@@ -1206,57 +1204,61 @@ local function buildTranslationHtml(word, reading, ai, original_word, frequency,
         end
     end
 
-    local block = {}
-    if source_html ~= "" then
-        block[#block+1] =
-            '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.3em 0 0.1em 0">'
-            .. source_html .. '</p>'
-    end
-    block[#block+1] =
-        '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.1em 0 0.4em 0">'
-        .. translation .. '</p>'
-    if not opts.hide_grammar then
-        block[#block+1] = '<hr/>'
-        block[#block+1] =
-            '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.3em 0">'
-            .. '<font color="#aaa"><i>' .. _("Generating romaji and breakdown...") .. '</i></font></p>'
-    end
-
     local body = '<p><b>' .. _html_esc(word) .. '</b>' .. reading_str .. freq_str .. _count_badge(count) .. '</p>\n'
         .. _build_kanji_html(kanji)
         .. '<hr/>\n'
-        .. table.concat(block, "\n") .. "\n"
-        .. '<p style="margin-top:0.3em"><font color="gray"><small>'
-        .. _html_esc(ai.model_used or _("unknown"))
-        .. '</small></font></p>'
+
+    -- 1. Japanese source (always)
+    if source_html ~= "" then
+        body = body
+            .. '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.3em 0 0.1em 0">'
+            .. source_html .. '</p>\n'
+    end
+
+    -- 2. ES translation (only when _show_trans_details)
+    if _show_trans_details then
+        local translation = (ai.translation_and_nuance or _("No analysis available"))
+            :gsub("^%s+", ""):gsub("%s+$", "")
+        translation = _html_esc(translation):gsub("\n", "<br/>")
+        body = body
+            .. '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.1em 0 0.4em 0">'
+            .. translation .. '</p>\n'
+        body = body
+            .. '<p style="margin-top:0.3em"><font color="gray"><small>'
+            .. _html_esc(ai.model_used or _("unknown"))
+            .. '</small></font></p>\n'
+    end
+
+    -- Grammar loading indicator
+    if not opts.hide_grammar then
+        body = body
+            .. '<hr/>\n'
+            .. '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.3em 0">'
+            .. '<font color="#aaa"><i>' .. _("Generating romaji and breakdown...") .. '</i></font></p>\n'
+    end
 
     return _XHTML_HEAD .. body .. _XHTML_TAIL
 end
 
--- opts.hide_translation = true → skip Japanese source + Spanish translation block
--- opts.hide_grammar     = true → skip romaji + grammar analysis block
+-- opts.hide_translation = true → ES translation disabled (user setting)
+-- opts.hide_grammar     = true → grammar section fully disabled (user setting)
+-- _show_trans_details (module-level) → user's per-lookup toggle for romaji+ES
 local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original_word, frequency, count, kanji, opts)
     opts = opts or {}
     local reading_str = (reading and reading ~= "") and
         (" <i>(" .. _html_esc(reading) .. ")</i>") or ""
     local freq_str = _build_freq_str(frequency)
-    local romaji = (not opts.hide_grammar) and (romaji_sentence or "") or ""
 
     local body = '<p><b>' .. _html_esc(word) .. '</b>' .. reading_str .. freq_str .. _count_badge(count) .. '</p>\n'
         .. _build_kanji_html(kanji)
         .. '<hr/>\n'
 
-    -- Translation block
+    -- 1. Japanese source sentence (always visible)
     if not opts.hide_translation then
-        local source = ai.source_sentence or ""
-        local translation = (ai.translation_and_nuance or _("No analysis available"))
-            :gsub("^%s+", ""):gsub("%s+$", "")
-        translation = _html_esc(translation):gsub("\n", "<br/>")
-
-        local source_html = ""
+        local source = ai and ai.source_sentence or ""
         if source ~= "" then
             local esc = _html_esc(source)
-            source_html = esc
+            local source_html = esc
             for _, t in ipairs({ word or "", original_word or "" }) do
                 if t ~= "" then
                     local et = _html_esc(t)
@@ -1267,14 +1269,26 @@ local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original
                     end
                 end
             end
+            body = body
+                .. '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.3em 0 0.1em 0">'
+                .. source_html .. '</p>\n'
         end
+    end
 
+    -- 2. Romaji (only when _show_trans_details and grammar is available)
+    local romaji = (not opts.hide_grammar) and (romaji_sentence or "") or ""
+    if _show_trans_details and romaji ~= "" then
+        body = body
+            .. '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.1em 0">'
+            .. '<i><font color="#666">' .. _html_esc(romaji) .. '</font></i></p>\n'
+    end
+
+    -- 3. Spanish translation (only when _show_trans_details)
+    if _show_trans_details and not opts.hide_translation then
+        local translation = (ai and ai.translation_and_nuance or _("No analysis available"))
+            :gsub("^%s+", ""):gsub("%s+$", "")
+        translation = _html_esc(translation):gsub("\n", "<br/>")
         local block = {}
-        if source_html ~= "" then
-            block[#block+1] =
-                '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.3em 0 0.1em 0">'
-                .. source_html .. '</p>'
-        end
         block[#block+1] =
             '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.1em 0 0.4em 0">'
             .. translation .. '</p>'
@@ -1286,13 +1300,8 @@ local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original
             .. '</small></font></p>'
     end
 
-    -- Grammar block
+    -- 4. Grammar section (always visible; not affected by _show_trans_details)
     if not opts.hide_grammar then
-        if romaji ~= "" then
-            body = body .. '<hr/>\n'
-                .. '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.3em 0 0.3em 0">'
-                .. '<i><font color="#666">' .. _html_esc(romaji) .. '</font></i></p>\n'
-        end
         local gram_text = grammar and grammar.analysis or ""
         if gram_text ~= "" then
             local gram_model = (grammar and grammar.model) or ""
@@ -1574,10 +1583,69 @@ local function yomitsuInterceptor(scope, text, ...)
         -- to avoid e-ink full-screen refreshes during generation.
         local trans_meta_done, trans_meta_buf = false, ""
         local trans_buf, trans_source, trans_model = "", "", ""
+        local trans_done = false
 
         local gram_meta_done, gram_meta_buf = false, ""
         local gram_buf, gram_romaji, gram_model = "", "", ""
-        local gram_done = false  -- true once on_gram_done has rendered the full analysis
+        local gram_done = false
+        local ask_extra_html = ""  -- appended by Ask AI to the viewer content
+
+        -- Builds the correct HTML for the current streaming state + toggle state.
+        -- Called by on_trans_done, on_gram_done, and the toggle/ask buttons.
+        local function rebuild_current()
+            local ai_obj = {
+                translation_and_nuance = trans_buf ~= "" and trans_buf or _("No translation."),
+                source_sentence        = trans_source,
+                model_used             = trans_model ~= "" and trans_model or "Hy-MT2-7B",
+            }
+            local opts = { hide_translation = not show_trans, hide_grammar = not show_gram }
+            local gram_obj = gram_done
+                and { analysis = gram_buf, model = gram_model ~= "" and gram_model or "gpt-4.1-mini" }
+                or nil
+            local html
+            if gram_done or not show_gram then
+                html = buildAiHtml(word, reading, ai_obj, gram_obj, gram_romaji,
+                    original_word, frequency, lookup_count, kanji, opts)
+            elseif trans_done then
+                html = buildTranslationHtml(word, reading, ai_obj, original_word,
+                    frequency, lookup_count, kanji, { hide_grammar = not show_gram })
+            else
+                html = buildLoadingHtml(word, reading, frequency, lookup_count, kanji)
+            end
+            if ask_extra_html ~= "" then
+                html = html:gsub("</body>", ask_extra_html .. "</body>")
+            end
+            return html
+        end
+
+        -- Expose rebuild + ask functions on the viewer for button callbacks.
+        viewer._yomitsu_rebuild = rebuild_current
+
+        viewer._yomitsu_ask = function(question)
+            ask_extra_html = '<hr/><p style="border-left:3px solid #888; padding-left:0.5em; margin:0.3em 0"><b>'
+                .. _html_esc(question) .. '</b></p>'
+                .. '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.1em 0">'
+                .. '<font color="#aaa"><i>Consultando AI...</i></font></p>'
+            update_yomitsu_ia(rebuild_current())
+            local ask_payload = json.encode({
+                question       = question,
+                context_phrase = context,
+                target_word    = word,
+                page_context   = page_ctx,
+            })
+            local ask_buf = ""
+            async_stream_post(_ACTIVE_HOST, _ACTIVE_PORT, "/ask-stream",
+                ask_payload, nil, 60,
+                function(chunk) ask_buf = ask_buf .. chunk end,
+                function(_success)
+                    local answer = ask_buf ~= "" and ask_buf or "Sin respuesta."
+                    ask_extra_html = '<hr/><p style="border-left:3px solid #888; padding-left:0.5em; margin:0.3em 0"><b>'
+                        .. _html_esc(question) .. '</b></p>'
+                        .. '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.1em 0">'
+                        .. _html_esc(answer):gsub("\n", "<br/>") .. '</p>'
+                    update_yomitsu_ia(rebuild_current())
+                end)
+        end
 
         -- ── Translation stream ────────────────────────────────────────────────────
         local function on_trans_chunk(chunk)
@@ -1605,20 +1673,8 @@ local function yomitsuInterceptor(scope, text, ...)
         local function on_trans_done(success)
             if my_id ~= _search_id then return end
             if trans_buf == "" then trans_buf = _("No translation.") end
-            local ai = {
-                translation_and_nuance = trans_buf,
-                source_sentence        = trans_source,
-                model_used             = trans_model ~= "" and trans_model or "Hy-MT2-7B",
-            }
-            local opts = { hide_grammar = not show_gram }
-            if gram_done or not show_gram then
-                local grammar = gram_done
-                    and { analysis = gram_buf, model = gram_model ~= "" and gram_model or "gpt-4.1-mini" }
-                    or nil
-                update_yomitsu_ia(buildAiHtml(word, reading, ai, grammar, gram_romaji, original_word, frequency, lookup_count, kanji, opts))
-            else
-                update_yomitsu_ia(buildTranslationHtml(word, reading, ai, original_word, frequency, lookup_count, kanji, opts))
-            end
+            trans_done = true
+            update_yomitsu_ia(rebuild_current())
             logger.info("[YOMITSU] Traducción completada")
         end
 
@@ -1655,15 +1711,8 @@ local function yomitsuInterceptor(scope, text, ...)
                 gram_romaji = rom:match("^%s*(.-)%s*$") or rom
                 gram_buf    = gram_buf:match("^(.-)%s*\nROMAJI:") or gram_buf
             end
-            local ai = {
-                translation_and_nuance = show_trans and (trans_buf ~= "" and trans_buf or "—") or nil,
-                source_sentence        = show_trans and trans_source or nil,
-                model_used             = show_trans and (trans_model ~= "" and trans_model or "Hy-MT2-7B") or nil,
-            }
-            local grammar = { analysis = gram_buf, model = gram_model ~= "" and gram_model or "gpt-4.1-mini" }
             gram_done = true
-            local opts = { hide_translation = not show_trans }
-            update_yomitsu_ia(buildAiHtml(word, reading, ai, grammar, gram_romaji, original_word, frequency, lookup_count, kanji, opts))
+            update_yomitsu_ia(rebuild_current())
             logger.info("[YOMITSU] Gramática completada")
         end
 
@@ -1866,6 +1915,68 @@ function Yomitsu:init()
 
     if self.ui and self.ui.menu then
         self.ui.menu:registerToMainMenu(self)
+    end
+
+    -- Register custom buttons into DictQuickLookup's button bar.
+    -- Replace the default layout so only navigation + Yomitsu buttons appear.
+    if self.ui and self.ui.dictionary then
+        self.ui.dictionary.default_layout = {
+            { "prev_dict", "yomitsu_toggle", "yomitsu_ask_ai", "next_dict" }
+        }
+
+        self.ui.dictionary:addToDictButtons({
+            id        = "yomitsu_toggle",
+            text_func = function(_dp)
+                return _show_trans_details and "▲ ES/ロ" or "▼ ES/ロ"
+            end,
+            callback = function(dict_popup)
+                _show_trans_details = not _show_trans_details
+                if dict_popup._yomitsu_rebuild and dict_popup.results and dict_popup.results[1] then
+                    dict_popup.results[1].definition = dict_popup._yomitsu_rebuild()
+                    if dict_popup.dict_index == 1 then
+                        pcall(function() dict_popup:changeDictionary(1) end)
+                    end
+                end
+                local btn = dict_popup.button_table and dict_popup.button_table:getButtonById("yomitsu_toggle")
+                if btn then
+                    btn:setText(_show_trans_details and "▲ ES/ロ" or "▼ ES/ロ", btn.width)
+                    btn:refresh()
+                end
+            end,
+        })
+
+        self.ui.dictionary:addToDictButtons({
+            id       = "yomitsu_ask_ai",
+            text     = "? AI",
+            callback = function(dict_popup)
+                if not dict_popup._yomitsu_ask then return end
+                local dlg
+                dlg = InputDialog:new{
+                    title   = _("Ask AI about this phrase"),
+                    input   = "",
+                    buttons = {{
+                        {
+                            text     = _("Cancel"),
+                            id       = "close",
+                            callback = function() UIManager:close(dlg) end,
+                        },
+                        {
+                            text             = _("Send"),
+                            is_enter_default = true,
+                            callback         = function()
+                                local q = dlg:getInputText()
+                                UIManager:close(dlg)
+                                if q and q ~= "" then
+                                    dict_popup._yomitsu_ask(q)
+                                end
+                            end,
+                        },
+                    }},
+                }
+                UIManager:show(dlg)
+                dlg:onShowKeyboard()
+            end,
+        })
     end
 end
 

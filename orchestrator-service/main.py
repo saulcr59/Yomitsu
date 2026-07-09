@@ -142,6 +142,13 @@ class WarmPageRequest(BaseModel):
     text: str
 
 
+class AskRequest(BaseModel):
+    question: str
+    context_phrase: str
+    target_word: str = ""
+    page_context: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -424,3 +431,39 @@ async def analyze_dict_only(request: LookUpAndTranslateRequest):
         except Exception as e:
             logger.error(f"[DICT-PROXY-ERROR] {e}")
             raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/ask-stream")
+async def ask_stream_ep(request: AskRequest):
+    """Stream a tutoring answer from ChatGPT about a specific Japanese phrase/word."""
+    if not _oai_client:
+        async def _no_key():
+            yield "OpenAI API key not configured."
+        return StreamingResponse(_no_key(), media_type="text/plain")
+
+    system_prompt = (
+        "Eres un tutor de japonés. El estudiante está leyendo en japonés y tiene una pregunta "
+        "sobre una frase o palabra. Responde de forma concisa y clara en español."
+    )
+    ctx_part = f"Frase: {request.context_phrase}" if request.context_phrase else ""
+    word_part = f"Palabra: {request.target_word}" if request.target_word else ""
+    page_part = f"Contexto de página:\n{request.page_context}" if request.page_context else ""
+    user_msg = "\n".join(p for p in [ctx_part, word_part, page_part, f"Pregunta: {request.question}"] if p)
+
+    async def gen():
+        try:
+            async with _oai_client.chat.completions.stream(
+                model=GRAMMAR_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_msg},
+                ],
+                max_tokens=400,
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield text
+        except Exception as e:
+            logger.error(f"[ASK-STREAM] {e}")
+            yield f"Error: {e}"
+
+    return StreamingResponse(gen(), media_type="text/plain")
