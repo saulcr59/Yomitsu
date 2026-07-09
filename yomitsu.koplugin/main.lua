@@ -1934,7 +1934,10 @@ function Yomitsu:init()
     end
 
     -- Register custom buttons into DictQuickLookup's button bar.
-    -- Replace the default layout so only navigation + Yomitsu buttons appear.
+    -- Clear any saved button config so our default_layout always takes effect
+    -- (if dict_button_config exists, KOReader uses it and ignores default_layout).
+    G_reader_settings:delSetting("dict_button_config")
+
     if self.ui and self.ui.dictionary then
         self.ui.dictionary.default_layout = {
             { "prev_dict", "yomitsu_font_dec", "yomitsu_toggle", "yomitsu_ask_ai", "yomitsu_font_inc", "next_dict" }
