@@ -317,6 +317,37 @@ def _split_page_sentences(text: str) -> list[str]:
     return result
 
 
+async def _prewarm_sentence_grammar(sentence: str, target_word: str, part_of_speech: str) -> None:
+    """Analyze grammar for one sentence and store in _gram_cache (romaji included)."""
+    if _gram_cache.get(sentence) is not None:
+        return
+    grammar_payload = {
+        "context_phrase": sentence,
+        "target_word":    target_word,
+        "original_word":  "",
+        "part_of_speech": part_of_speech,
+        "page_context":   "",
+    }
+    _, romaji_sentence = await _tokenize(sentence, target_word)
+    meta_str = json.dumps({"romaji": romaji_sentence, "model": GRAMMAR_MODEL}, ensure_ascii=False)
+    chunks: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            async with client.stream("POST", GRAMMAR_STREAM_URL, json=grammar_payload) as resp:
+                async for chunk in resp.aiter_text():
+                    if chunk:
+                        chunks.append(chunk)
+        if chunks:
+            _gram_cache.set(sentence, {
+                "meta":        meta_str,
+                "text":        "".join(chunks),
+                "target_word": target_word,
+            })
+            logger.info(f"[GRAM-PREWARM] '{target_word}' | '{sentence[:40]}'")
+    except Exception as e:
+        logger.error(f"[GRAM-PREWARM] '{sentence[:30]}': {e}")
+
+
 async def _prewarm_sentence_translation(sentence: str) -> None:
     """Translate one sentence and store the result in _trans_cache.
     Called as a background task; errors are silently logged."""
@@ -357,17 +388,24 @@ async def warm_page_ep(request: WarmPageRequest):
     except Exception as e:
         logger.error(f"[WARM-PAGE-DICT] {e}")
 
-    # 2. Pre-warm translation cache for every unique sentence on the page.
+    # 2. Pre-warm translation and grammar caches for every sentence.
+    #    Grammar targets come from the dict service (best token per sentence).
     #    Launched as background tasks so this endpoint returns immediately.
-    sentences = _split_page_sentences(request.text)
-    queued = 0
-    for sentence in sentences:
+    queued_trans = 0
+    queued_gram  = 0
+
+    for item in dict_result.get("sentence_targets", []):
+        sentence = item["sentence"]
         if _trans_cache.get(sentence) is None:
             asyncio.create_task(_prewarm_sentence_translation(sentence))
-            queued += 1
+            queued_trans += 1
+        if _gram_cache.get(sentence) is None:
+            asyncio.create_task(_prewarm_sentence_grammar(
+                sentence, item["target_word"], item["part_of_speech"]))
+            queued_gram += 1
 
-    logger.info(f"[WARM-PAGE] dict={dict_warmed} trans_queued={queued}")
-    return {"dict_warmed": dict_warmed, "trans_queued": queued}
+    logger.info(f"[WARM-PAGE] dict={dict_warmed} trans={queued_trans} gram={queued_gram}")
+    return {"dict_warmed": dict_warmed, "trans_queued": queued_trans, "gram_queued": queued_gram}
 
 
 @app.post("/analyze-dict")

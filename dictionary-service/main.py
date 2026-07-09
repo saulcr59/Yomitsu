@@ -757,18 +757,59 @@ async def _warm_token(normalized: str, reading: str, original: str) -> None:
     }
 
 
+_GRAMMAR_POS_PRIORITY = {
+    "verb": 1, "i-adjective": 2, "na-adjective": 2, "noun": 3,
+    "adverb": 4, "conjunction": 5,
+}
+_GRAMMAR_POS_SKIP = {"particle", "auxiliary verb", "symbol", "supplementary symbol", "suffix", "prefix"}
+
+
+def _best_token_for_grammar(tokens) -> dict | None:
+    """Return {normalized, part_of_speech} for the most interesting token in a
+    sentence: prefer verbs → adjectives → nouns → other content words."""
+    best = None
+    best_pri = 999
+    for tok in tokens:
+        pos_en = _POS_MAP.get(tok.part_of_speech()[0], "other")
+        if pos_en in _GRAMMAR_POS_SKIP:
+            continue
+        pri = _GRAMMAR_POS_PRIORITY.get(pos_en, 6)
+        if pri < best_pri:
+            best_pri = pri
+            best = {"normalized": tok.normalized_form(), "part_of_speech": pos_en}
+    return best
+
+
 @app.post("/warm-page")
 async def warm_page(request: WarmPageRequest):
-    tokens = tokenizer_obj.tokenize(request.text, mode)
-    seen: set[str] = set()
-    tasks = []
-    for token in tokens:
-        nf = token.normalized_form()
-        if nf in seen or nf in _page_warm_cache:
+    # Tokenize sentence by sentence so we can report the best target per sentence
+    # for the orchestrator to use when pre-warming grammar.
+    raw_sentences = re.split(r'(?<=[。！？])|(?<=\n)', request.text)
+
+    seen_forms: set[str] = set()
+    dict_tasks: list = []
+    sentence_targets: list[dict] = []
+
+    for raw in raw_sentences:
+        sentence = raw.strip()
+        if not sentence:
             continue
-        seen.add(nf)
-        tasks.append(_warm_token(nf, token.reading_form(), token.surface()))
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-    logger.info(f"[WARM-PAGE] {len(tasks)} tokens precargados")
-    return {"warmed": len(tasks)}
+        tokens = tokenizer_obj.tokenize(sentence, mode)
+        for tok in tokens:
+            nf = tok.normalized_form()
+            if nf not in seen_forms and nf not in _page_warm_cache:
+                seen_forms.add(nf)
+                dict_tasks.append(_warm_token(nf, tok.reading_form(), tok.surface()))
+        best = _best_token_for_grammar(tokens)
+        if best:
+            sentence_targets.append({
+                "sentence":      sentence,
+                "target_word":   best["normalized"],
+                "part_of_speech": best["part_of_speech"],
+            })
+
+    if dict_tasks:
+        await asyncio.gather(*dict_tasks, return_exceptions=True)
+
+    logger.info(f"[WARM-PAGE] {len(dict_tasks)} tokens dict | {len(sentence_targets)} frases para gramática")
+    return {"warmed": len(dict_tasks), "sentence_targets": sentence_targets}
