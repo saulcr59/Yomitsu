@@ -1329,9 +1329,185 @@ local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original
     return _XHTML_HEAD .. body .. _XHTML_TAIL
 end
 
+-- Legacy KOReader (pre-2026.05): addToDictButtons / buildButtonLayout don't exist.
+-- Patch DictQuickLookup.init to intercept the single ButtonTable:new call and inject
+-- our button row directly into the buttons table before it's built.
+local _dql_init_patched = false
+local function _patch_dql_init_legacy()
+    if _dql_init_patched then return end
+    _dql_init_patched = true
+
+    local ButtonTable = package.loaded["ui/widget/buttontable"]
+    if not ButtonTable then
+        pcall(function() ButtonTable = require("ui/widget/buttontable") end)
+    end
+    if not ButtonTable or not DictQuickLookup.init then return end
+
+    local _orig_dql_init = DictQuickLookup.init
+    DictQuickLookup.init = function(dlq, ...)
+        if not dlq.is_wiki_fullpage then
+            -- Temporarily hijack ButtonTable.new for the duration of this init call.
+            local _orig_bt_new = ButtonTable.new
+            local _done = false
+            ButtonTable.new = function(cls, opts)
+                ButtonTable.new = _orig_bt_new  -- restore immediately
+                if not _done and type(opts) == "table" and type(opts.buttons) == "table" then
+                    _done = true
+
+                    -- Extract ◁◁ / ▷▷ specs from whatever rows exist (ignore all others)
+                    local prev_spec, next_spec
+                    for _, row in ipairs(opts.buttons) do
+                        for _, btn in ipairs(row) do
+                            if type(btn) == "table" then
+                                if btn.id == "prev_dict" then prev_spec = btn end
+                                if btn.id == "next_dict" then next_spec = btn end
+                            end
+                        end
+                    end
+
+                    -- Wipe every existing row (removes Highlight, Wikipedia, Search,
+                    -- Close, VocabBuilder, Wikipedia AI, Diccionario AI, etc.)
+                    while #opts.buttons > 0 do table.remove(opts.buttons) end
+
+                    -- Single combined row: ◁◁  A-  ▼ES/ロ  ?AI  A+  ▷▷
+                    local row = {}
+                    if prev_spec then row[#row+1] = prev_spec end
+                    row[#row+1] = {
+                        id       = "yomitsu_1_font_dec",
+                        text     = "A-",
+                        callback = function()
+                            local sz = math.max(8, math.min(40, (dlq.dict_font_size or 20) - 2))
+                            dlq.dict_font_size = sz
+                            G_reader_settings:saveSetting("dict_font_size", sz)
+                            pcall(function() dlq:update() end)
+                        end,
+                    }
+                    row[#row+1] = {
+                        id        = "yomitsu_2_toggle",
+                        text_func = function() return _show_trans_details and "▲ ES/ロ" or "▼ ES/ロ" end,
+                        callback  = function()
+                            _show_trans_details = not _show_trans_details
+                            if dlq._yomitsu_rebuild and dlq.results and dlq.results[1] then
+                                dlq.results[1].definition = dlq._yomitsu_rebuild()
+                                if dlq.dict_index == 1 then
+                                    pcall(function() dlq:changeDictionary(1) end)
+                                end
+                            end
+                            local b = dlq.button_table and dlq.button_table:getButtonById("yomitsu_2_toggle")
+                            if b then
+                                b:setText(_show_trans_details and "▲ ES/ロ" or "▼ ES/ロ", b.width)
+                                b:refresh()
+                            end
+                        end,
+                    }
+                    row[#row+1] = {
+                        id       = "yomitsu_3_ask_ai",
+                        text     = "? AI",
+                        callback = function()
+                            if not dlq._yomitsu_open_chat then return end
+                            dlq._yomitsu_open_chat()
+                        end,
+                    }
+                    row[#row+1] = {
+                        id       = "yomitsu_4_font_inc",
+                        text     = "A+",
+                        callback = function()
+                            local sz = math.max(8, math.min(40, (dlq.dict_font_size or 20) + 2))
+                            dlq.dict_font_size = sz
+                            G_reader_settings:saveSetting("dict_font_size", sz)
+                            pcall(function() dlq:update() end)
+                        end,
+                    }
+                    if next_spec then row[#row+1] = next_spec end
+                    opts.buttons[1] = row
+                end
+                return _orig_bt_new(cls, opts)
+            end
+            local ok, err = pcall(_orig_dql_init, dlq, ...)
+            ButtonTable.new = _orig_bt_new  -- ensure restore even on error
+            if not ok then error(err, 2) end
+        else
+            _orig_dql_init(dlq, ...)
+        end
+    end
+end
+
+-- Register Yomitsu buttons into the dict popup. Called lazily from yomitsuInterceptor.
+-- Modern KOReader (2026.05+): uses addToDictButtons with conditional=true.
+-- Legacy KOReader: buttons injected via _patch_dql_init_legacy() in Yomitsu:init().
+local function _register_dict_buttons(scope)
+    if scope._yomitsu_buttons_registered then return end
+    scope._yomitsu_buttons_registered = true
+
+    if not scope.addToDictButtons then return end  -- legacy: handled by DictQuickLookup.init patch
+
+    -- Number prefixes force the desired order via orderedPairs (alphabetical).
+    local RG = "yomitsu_buttons"
+
+    scope:addToDictButtons({
+        id          = "yomitsu_1_font_dec",
+        text        = "A-",
+        conditional = true,
+        row_group   = RG,
+        callback    = function(dlq)
+            local sz = math.max(8, math.min(40, (dlq.dict_font_size or 20) - 2))
+            dlq.dict_font_size = sz
+            G_reader_settings:saveSetting("dict_font_size", sz)
+            pcall(function() dlq:update() end)
+        end,
+    })
+
+    scope:addToDictButtons({
+        id          = "yomitsu_2_toggle",
+        text_func   = function() return _show_trans_details and "▲ ES/ロ" or "▼ ES/ロ" end,
+        conditional = true,
+        row_group   = RG,
+        callback    = function(dlq)
+            _show_trans_details = not _show_trans_details
+            if dlq._yomitsu_rebuild and dlq.results and dlq.results[1] then
+                dlq.results[1].definition = dlq._yomitsu_rebuild()
+                if dlq.dict_index == 1 then
+                    pcall(function() dlq:changeDictionary(1) end)
+                end
+            end
+            local b = dlq.button_table and dlq.button_table:getButtonById("yomitsu_2_toggle")
+            if b then
+                b:setText(_show_trans_details and "▲ ES/ロ" or "▼ ES/ロ", b.width)
+                b:refresh()
+            end
+        end,
+    })
+
+    scope:addToDictButtons({
+        id          = "yomitsu_3_ask_ai",
+        text        = "? AI",
+        conditional = true,
+        row_group   = RG,
+        callback    = function(dlq)
+            if not dlq._yomitsu_open_chat then return end
+            dlq._yomitsu_open_chat()
+        end,
+    })
+
+    scope:addToDictButtons({
+        id          = "yomitsu_4_font_inc",
+        text        = "A+",
+        conditional = true,
+        row_group   = RG,
+        callback    = function(dlq)
+            local sz = math.max(8, math.min(40, (dlq.dict_font_size or 20) + 2))
+            dlq.dict_font_size = sz
+            G_reader_settings:saveSetting("dict_font_size", sz)
+            pcall(function() dlq:update() end)
+        end,
+    })
+end
+
 local function yomitsuInterceptor(scope, text, ...)
     logger.info("[YOMITSU] Hook capturado:", text)
     local extra_args = {...}
+
+    _register_dict_buttons(scope)
 
     local doc      = scope.ui and scope.ui.doc
     local doc_lang = (doc and doc:getMeta("language") or "unknown"):lower()
@@ -1583,12 +1759,17 @@ local function yomitsuInterceptor(scope, text, ...)
 
         -- In-place update via KOReader's own changeDictionary — no close/reopen.
         -- Silent if user is on a different tab; visible when they navigate back.
+        -- addQueryWordToResult is suppressed because KOReader would otherwise
+        -- append "(consulta : %1)" to the bottom of our HTML on every update.
         local function update_yomitsu_ia(new_html)
             if my_id ~= _search_id then return end
             if not current_viewer then return end
             results[1].definition = new_html
             if current_viewer.dict_index == 1 then
+                local _orig_aqwtr = current_viewer.addQueryWordToResult
+                current_viewer.addQueryWordToResult = function() end
                 pcall(function() current_viewer:changeDictionary(1) end)
+                current_viewer.addQueryWordToResult = _orig_aqwtr
             end
         end
 
@@ -1633,33 +1814,110 @@ local function yomitsuInterceptor(scope, text, ...)
             return html
         end
 
-        -- Expose rebuild + ask functions on the viewer for button callbacks.
+        -- Expose rebuild function on the viewer for button callbacks.
         viewer._yomitsu_rebuild = rebuild_current
 
+        -- ── Chat AI state for this word's session ────────────────────────────────
+        local chat_history = {}   -- {q=..., a=...} ; a=nil while in flight
+        local chat_dlg     = nil  -- open InputDialog, or nil
+        local chat_waiting = false
+
+        local function _rebuild_ask_html()
+            if #chat_history == 0 then return "" end
+            local parts = {"<hr/>"}
+            for _, pair in ipairs(chat_history) do
+                parts[#parts+1] = '<p style="border-left:3px solid #888; padding-left:0.5em; margin:0.3em 0"><b>'
+                    .. _html_esc(pair.q) .. '</b></p>'
+                parts[#parts+1] = '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.1em 0">'
+                    .. (pair.a
+                        and _html_esc(pair.a):gsub("\n", "<br/>")
+                        or '<font color="#aaa"><i>Consultando AI...</i></font>')
+                    .. '</p>'
+            end
+            return table.concat(parts, "")
+        end
+
+        local function _open_chat_dialog()
+            if chat_dlg then
+                UIManager:close(chat_dlg)
+                chat_dlg = nil
+            end
+            -- Show only the last 2 exchanges in the description to avoid
+            -- overflowing the screen. Full history is in the Yomitsu IA tab.
+            local n = #chat_history
+            local show_from = math.max(1, n - 1)
+            local desc_parts = {}
+            if show_from > 1 then
+                desc_parts[#desc_parts+1] = "(" .. (show_from - 1) .. " anterior(es) — ver Yomitsu IA)"
+            end
+            for i = show_from, n do
+                local pair = chat_history[i]
+                desc_parts[#desc_parts+1] = "▶ " .. pair.q
+                desc_parts[#desc_parts+1] = (pair.a or "Consultando AI...")
+            end
+            local desc = #desc_parts > 0 and table.concat(desc_parts, "\n") or nil
+            chat_dlg = InputDialog:new{
+                title              = "Chat AI — " .. word,
+                description        = desc,
+                input              = "",
+                add_scroll_buttons = true,
+                buttons = {{
+                    { text = _("Close"), id = "close",
+                      callback = function()
+                          UIManager:close(chat_dlg)
+                          chat_dlg = nil
+                      end },
+                    { text = _("Send"), is_enter_default = true,
+                      callback = function()
+                          if chat_waiting then return end
+                          local q = chat_dlg:getInputText()
+                          if q and q ~= "" then
+                              viewer._yomitsu_ask(q)
+                          end
+                      end },
+                }},
+            }
+            UIManager:show(chat_dlg)
+            if not chat_waiting then
+                chat_dlg:onShowKeyboard()
+            end
+        end
+
+        viewer._yomitsu_open_chat = _open_chat_dialog
+
         viewer._yomitsu_ask = function(question)
-            ask_extra_html = '<hr/><p style="border-left:3px solid #888; padding-left:0.5em; margin:0.3em 0"><b>'
-                .. _html_esc(question) .. '</b></p>'
-                .. '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.1em 0">'
-                .. '<font color="#aaa"><i>Consultando AI...</i></font></p>'
+            if chat_waiting then return end
+            chat_waiting = true
+            table.insert(chat_history, { q = question, a = nil })
+            _open_chat_dialog()
+            ask_extra_html = _rebuild_ask_html()
             update_yomitsu_ia(rebuild_current())
+            -- Collect completed prior exchanges so the AI has conversation context
+            local prior = {}
+            for i = 1, #chat_history - 1 do
+                local p = chat_history[i]
+                if p.a then prior[#prior+1] = { q = p.q, a = p.a } end
+            end
             local ask_payload = json.encode({
                 question          = question,
                 context_phrase    = context,
                 target_word       = word,
                 page_context      = page_ctx,
                 response_language = _get_response_language(),
+                history           = prior,
             })
             local ask_buf = ""
             async_stream_post(_ACTIVE_HOST, _ACTIVE_PORT, "/ask-stream",
-                ask_payload, nil, 60,
+                ask_payload, my_id, 60,
                 function(chunk) ask_buf = ask_buf .. chunk end,
                 function(_success)
+                    if my_id ~= _search_id then return end
                     local answer = ask_buf ~= "" and ask_buf or "Sin respuesta."
-                    ask_extra_html = '<hr/><p style="border-left:3px solid #888; padding-left:0.5em; margin:0.3em 0"><b>'
-                        .. _html_esc(question) .. '</b></p>'
-                        .. '<p style="border-left:2px solid #ccc; padding-left:0.5em; margin:0.1em 0">'
-                        .. _html_esc(answer):gsub("\n", "<br/>") .. '</p>'
+                    chat_history[#chat_history].a = answer
+                    chat_waiting = false
+                    ask_extra_html = _rebuild_ask_html()
                     update_yomitsu_ia(rebuild_current())
+                    if chat_dlg then _open_chat_dialog() end
                 end)
         end
 
@@ -1929,95 +2187,14 @@ function Yomitsu:init()
         _apply_server(_ORCH_HOST, _ORCH_PORT)
     end
 
-    if self.ui and self.ui.menu then
-        self.ui.menu:registerToMainMenu(self)
+    -- For KOReader versions before 2026-05 (e.g., March 2026 release):
+    -- addToDictButtons doesn't exist, so we patch DictQuickLookup.init instead.
+    if not ReaderDictionary.addToDictButtons then
+        _patch_dql_init_legacy()
     end
 
-    -- Register custom buttons into DictQuickLookup's button bar.
-    -- Clear any saved button config so our default_layout always takes effect
-    -- (if dict_button_config exists, KOReader uses it and ignores default_layout).
-    G_reader_settings:delSetting("dict_button_config")
-
-    if self.ui and self.ui.dictionary then
-        self.ui.dictionary.default_layout = {
-            { "prev_dict", "yomitsu_font_dec", "yomitsu_toggle", "yomitsu_ask_ai", "yomitsu_font_inc", "next_dict" }
-        }
-
-        self.ui.dictionary:addToDictButtons({
-            id       = "yomitsu_font_dec",
-            text     = "A-",
-            callback = function(dict_popup)
-                local sz = math.max(8, (dict_popup.dict_font_size or 20) - 2)
-                dict_popup.dict_font_size = sz
-                G_reader_settings:saveSetting("dict_font_size", sz)
-                pcall(function() dict_popup:update() end)
-            end,
-        })
-
-        self.ui.dictionary:addToDictButtons({
-            id       = "yomitsu_font_inc",
-            text     = "A+",
-            callback = function(dict_popup)
-                local sz = math.min(40, (dict_popup.dict_font_size or 20) + 2)
-                dict_popup.dict_font_size = sz
-                G_reader_settings:saveSetting("dict_font_size", sz)
-                pcall(function() dict_popup:update() end)
-            end,
-        })
-
-        self.ui.dictionary:addToDictButtons({
-            id        = "yomitsu_toggle",
-            text_func = function(_dp)
-                return _show_trans_details and "▲ ES/ロ" or "▼ ES/ロ"
-            end,
-            callback = function(dict_popup)
-                _show_trans_details = not _show_trans_details
-                if dict_popup._yomitsu_rebuild and dict_popup.results and dict_popup.results[1] then
-                    dict_popup.results[1].definition = dict_popup._yomitsu_rebuild()
-                    if dict_popup.dict_index == 1 then
-                        pcall(function() dict_popup:changeDictionary(1) end)
-                    end
-                end
-                local btn = dict_popup.button_table and dict_popup.button_table:getButtonById("yomitsu_toggle")
-                if btn then
-                    btn:setText(_show_trans_details and "▲ ES/ロ" or "▼ ES/ロ", btn.width)
-                    btn:refresh()
-                end
-            end,
-        })
-
-        self.ui.dictionary:addToDictButtons({
-            id       = "yomitsu_ask_ai",
-            text     = "? AI",
-            callback = function(dict_popup)
-                if not dict_popup._yomitsu_ask then return end
-                local dlg
-                dlg = InputDialog:new{
-                    title   = _("Ask AI about this phrase"),
-                    input   = "",
-                    buttons = {{
-                        {
-                            text     = _("Cancel"),
-                            id       = "close",
-                            callback = function() UIManager:close(dlg) end,
-                        },
-                        {
-                            text             = _("Send"),
-                            is_enter_default = true,
-                            callback         = function()
-                                local q = dlg:getInputText()
-                                UIManager:close(dlg)
-                                if q and q ~= "" then
-                                    dict_popup._yomitsu_ask(q)
-                                end
-                            end,
-                        },
-                    }},
-                }
-                UIManager:show(dlg)
-                dlg:onShowKeyboard()
-            end,
-        })
+    if self.ui and self.ui.menu then
+        self.ui.menu:registerToMainMenu(self)
     end
 end
 

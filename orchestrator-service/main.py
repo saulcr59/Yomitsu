@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from openai import AsyncOpenAI
 
 load_dotenv()
@@ -150,6 +150,13 @@ class AskRequest(BaseModel):
     target_word: str = ""
     page_context: str = ""
     response_language: str = "English"
+    history: list = []  # [{q: ..., a: ...}, ...] prior exchanges
+
+    @field_validator("history", mode="before")
+    @classmethod
+    def _coerce_history(cls, v):
+        # Lua's JSON encoder may produce {} for an empty table instead of [].
+        return v if isinstance(v, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -453,20 +460,40 @@ async def ask_stream_ep(request: AskRequest):
     ctx_part  = f"Sentence: {request.context_phrase}" if request.context_phrase else ""
     word_part = f"Word: {request.target_word}" if request.target_word else ""
     page_part = f"Page context:\n{request.page_context}" if request.page_context else ""
-    user_msg  = "\n".join(p for p in [ctx_part, word_part, page_part, f"Question: {request.question}"] if p)
+    first_user_msg = "\n".join(p for p in [ctx_part, word_part, page_part] if p)
+
+    # Build multi-turn message list with prior exchanges as context
+    prior_history = request.history if isinstance(request.history, list) else []
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    for i, pair in enumerate(prior_history):
+        q = pair.get("q", "")
+        a = pair.get("a", "")
+        if not q or not a:
+            continue
+        # Include sentence/word context only in the first user turn
+        if i == 0 and first_user_msg:
+            messages.append({"role": "user", "content": first_user_msg + "\nQuestion: " + q})
+        else:
+            messages.append({"role": "user", "content": q})
+        messages.append({"role": "assistant", "content": a})
+    # Current question
+    if first_user_msg and not prior_history:
+        messages.append({"role": "user", "content": first_user_msg + "\nQuestion: " + request.question})
+    else:
+        messages.append({"role": "user", "content": request.question})
 
     async def gen():
         try:
-            async with _oai_client.chat.completions.stream(
+            stream = await _oai_client.chat.completions.create(
                 model=GRAMMAR_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": user_msg},
-                ],
+                messages=messages,
                 max_tokens=400,
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield text
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
         except Exception as e:
             logger.error(f"[ASK-STREAM] {e}")
             yield f"Error: {e}"
