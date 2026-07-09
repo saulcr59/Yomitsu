@@ -137,6 +137,10 @@ class PageContextRequest(BaseModel):
     manga_title: str = ""
 
 
+class WarmPageRequest(BaseModel):
+    text: str
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -296,6 +300,20 @@ async def analyze_grammar_stream_ep(request: AnalyzeAiRequest):
                 logger.info(f"[GRAM-CACHED] '{request.target_word}' in '{sentence[:50]}'")
 
     return StreamingResponse(generate(), media_type="text/plain")
+
+
+@app.post("/warm-page")
+async def warm_page_ep(request: WarmPageRequest):
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await client.post(f"{_DICT_BASE}/warm-page", json={"text": request.text})
+            res.raise_for_status()
+            result = res.json()
+            logger.info(f"[WARM-PAGE] {result.get('warmed', 0)} tokens precargados")
+            return result
+    except Exception as e:
+        logger.error(f"[WARM-PAGE] {e}")
+        return {"warmed": 0}
 
 
 @app.post("/analyze-dict")

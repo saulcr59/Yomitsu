@@ -423,6 +423,15 @@ class TokenizeRequest(BaseModel):
     char_offset: int | None = None  # byte offset of tapped word in context_phrase
 
 
+class WarmPageRequest(BaseModel):
+    text: str
+
+
+# In-memory cache populated by /warm-page. Keyed by normalized form; value is
+# the dictionary_data dict ready to embed in an /extract-word response.
+_page_warm_cache: dict[str, dict] = {}
+
+
 # ---------------------------------------------------------------------------
 # Tasks
 # ---------------------------------------------------------------------------
@@ -672,7 +681,12 @@ async def extract_word(request: TokenizeRequest):
     target_reading = sudachi_result.get("reading", "")
     original_word  = sudachi_result["original_word"]
 
-    # 2. Lookups en paralelo
+    # 2a. Warm-cache hit — skip all dict lookups
+    if target_word in _page_warm_cache:
+        logger.info(f"[WARM-HIT] '{target_word}'")
+        return {"word_data": sudachi_result, "dictionary_data": _page_warm_cache[target_word]}
+
+    # 2b. Lookups en paralelo
     (
         jitendex_result,
         kenkyusha_result,
@@ -718,3 +732,43 @@ async def extract_word(request: TokenizeRequest):
         f"Wisdom={wisdom_result['found']} Genius={genius_result['found']} Grammar={grammar_result['found']}"
     )
     return response_payload
+
+
+async def _warm_token(normalized: str, reading: str, original: str) -> None:
+    jitendex_result, kenkyusha_result, wisdom_result, genius_result, grammar_result = await asyncio.gather(
+        lookup_jitendex(normalized, reading, original),
+        lookup_kenkyusha(normalized, original),
+        lookup_wisdom(normalized, original),
+        lookup_genius(normalized, original),
+        lookup_grammar(normalized, original),
+    )
+    reading_display = jitendex_result.get("reading", "") or kata_to_hira(reading)
+    any_found = any(r["found"] for r in [jitendex_result, kenkyusha_result, wisdom_result, genius_result, grammar_result])
+    _page_warm_cache[normalized] = {
+        "reading":         reading_display,
+        "found":           any_found,
+        "frequency":       lookup_freq(normalized, original),
+        "kanji_breakdown": get_kanji_breakdown(normalized),
+        "jitendex":  {"html_content": jitendex_result["html_content"],  "found": jitendex_result["found"]},
+        "kenkyusha": {"html_content": kenkyusha_result["html_content"], "found": kenkyusha_result["found"]},
+        "wisdom":    {"html_content": wisdom_result["html_content"],    "found": wisdom_result["found"]},
+        "genius":    {"html_content": genius_result["html_content"],    "found": genius_result["found"]},
+        "grammar":   {"html_content": grammar_result["html_content"],   "found": grammar_result["found"]},
+    }
+
+
+@app.post("/warm-page")
+async def warm_page(request: WarmPageRequest):
+    tokens = tokenizer_obj.tokenize(request.text, mode)
+    seen: set[str] = set()
+    tasks = []
+    for token in tokens:
+        nf = token.normalized_form()
+        if nf in seen or nf in _page_warm_cache:
+            continue
+        seen.add(nf)
+        tasks.append(_warm_token(nf, token.reading_form(), token.surface()))
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    logger.info(f"[WARM-PAGE] {len(tasks)} tokens precargados")
+    return {"warmed": len(tasks)}

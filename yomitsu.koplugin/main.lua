@@ -1838,6 +1838,28 @@ function Yomitsu:init()
     end
 end
 
+function Yomitsu:onPageUpdate(pageno)
+    if not (self.ui and self.ui.document) then return end
+    local text = nil
+    pcall(function()
+        local raw = self.ui.document:getPageText(pageno)
+        if type(raw) == "string" and #raw > 1 then
+            text = raw
+        elseif type(raw) == "table" then
+            local parts = {}
+            for _, block in ipairs(raw) do
+                local s = type(block) == "table" and block.text or (type(block) == "string" and block)
+                if s and #s > 0 then parts[#parts + 1] = s end
+            end
+            if #parts > 0 then text = table.concat(parts, " ") end
+        end
+    end)
+    if not text or #text < 2 then return end
+    -- Fire and forget: my_id=nil so it is never cancelled by user word lookups
+    async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
+        json.encode({ text = text }), nil, 30, function() end)
+end
+
 function Yomitsu:_showUrlDialog(title, current_host, current_port, hint, on_save, tmi)
     local dialog
     local current = current_host ~= "" and (current_host .. ":" .. tostring(current_port)) or ""
