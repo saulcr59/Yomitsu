@@ -66,7 +66,8 @@ local CACHE_MAX   = 50
 
 -- Page context cache keyed by "cbz_path:page_no" → GPT scene description.
 -- Populated in background after first word per page; used for all subsequent lookups.
-local _page_ctx_cache = {}
+local _page_ctx_cache  = {}
+local _warmed_pages    = {}  -- pages already sent to /warm-page
 
 local function _page_key(scope)
     local ui = scope and scope.ui
@@ -1516,6 +1517,17 @@ local function yomitsuInterceptor(scope, text, ...)
         end
         local page_ctx = (cur_page_key and _page_ctx_cache[cur_page_key]) or ""
 
+        -- On first lookup per page, warm the dict cache for all other words.
+        -- Use Mokuro OCR text if available, otherwise the sentence context.
+        if cur_page_key and not _warmed_pages[cur_page_key] then
+            local warm_text = (page_ctx ~= "" and page_ctx) or context
+            if warm_text and #warm_text > 1 then
+                _warmed_pages[cur_page_key] = true
+                async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
+                    json.encode({ text = warm_text }), nil, 30, function() end)
+            end
+        end
+
         -- Shared payload for both streaming requests
         local ok_ai, ai_payload = pcall(json.encode, {
             context_phrase = context,
@@ -1838,27 +1850,6 @@ function Yomitsu:init()
     end
 end
 
-function Yomitsu:onPageUpdate(pageno)
-    if not (self.ui and self.ui.document) then return end
-    local text = nil
-    pcall(function()
-        local raw = self.ui.document:getPageText(pageno)
-        if type(raw) == "string" and #raw > 1 then
-            text = raw
-        elseif type(raw) == "table" then
-            local parts = {}
-            for _, block in ipairs(raw) do
-                local s = type(block) == "table" and block.text or (type(block) == "string" and block)
-                if s and #s > 0 then parts[#parts + 1] = s end
-            end
-            if #parts > 0 then text = table.concat(parts, " ") end
-        end
-    end)
-    if not text or #text < 2 then return end
-    -- Fire and forget: my_id=nil so it is never cancelled by user word lookups
-    async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
-        json.encode({ text = text }), nil, 30, function() end)
-end
 
 function Yomitsu:_showUrlDialog(title, current_host, current_port, hint, on_save, tmi)
     local dialog
