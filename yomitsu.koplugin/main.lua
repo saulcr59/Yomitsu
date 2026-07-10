@@ -2199,6 +2199,42 @@ function Yomitsu:init()
 end
 
 
+-- Auto-warm the AI/dict cache when Mokuro turns a page, before the user taps.
+-- KOReader broadcasts "PageUpdate" through all registered modules, so this is
+-- called automatically on every page flip.
+function Yomitsu:onPageUpdate(pageno)
+    if not _ACTIVE_HOST or _ACTIVE_HOST == "" then return end
+    local ui = self.ui
+    if not ui or not ui.document or not ui.document.file then return end
+
+    local cur_page_key = ui.document.file .. ":" .. tostring(pageno)
+    -- Keep _last_page_key in sync so yomitsuInterceptor won't reset _warmed_pages
+    -- on the first word tap and send a redundant warm request.
+    _last_page_key = cur_page_key
+    if _warmed_pages[cur_page_key] then return end
+
+    -- Try to read Mokuro OCR text for this page.
+    if not _page_ctx_cache[cur_page_key] then
+        local fake_scope = { ui = ui }
+        local ok, text = pcall(_mokuro_page_text, fake_scope)
+        if ok and type(text) == "string" and text ~= "" then
+            _page_ctx_cache[cur_page_key] = text
+            logger.info("[YOMITSU] OCR auto-cacheado: " .. #text .. "b p=" .. tostring(pageno))
+        end
+    end
+
+    local warm_text = _page_ctx_cache[cur_page_key]
+    if not warm_text or #warm_text <= 1 then return end  -- no OCR text; will warm on first tap
+
+    _warmed_pages[cur_page_key] = true
+    async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
+        json.encode({ text = warm_text, response_language = _get_response_language() }), nil, 30,
+        function(code, _body)
+            logger.info("[YOMITSU] warm-page auto: " .. tostring(code) .. " p=" .. tostring(pageno))
+        end)
+end
+
+
 function Yomitsu:_showUrlDialog(title, current_host, current_port, hint, on_save, tmi)
     local dialog
     local current = current_host ~= "" and (current_host .. ":" .. tostring(current_port)) or ""
