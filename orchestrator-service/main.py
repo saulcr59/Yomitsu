@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import time
 import httpx
 import logging
 from collections import OrderedDict
@@ -13,6 +14,8 @@ from pydantic import BaseModel, field_validator
 from openai import AsyncOpenAI
 
 load_dotenv()
+
+_SERVER_EPOCH = str(int(time.time()))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,7 +37,9 @@ async def lifespan(app: FastAPI):
     api_key = os.environ.get("OPENAI_API_KEY")
     if api_key:
         _oai_client = AsyncOpenAI(api_key=api_key)
+    _load_caches()
     yield
+    _save_caches()
     await _http_client.aclose()
 
 
@@ -57,7 +62,8 @@ GRAMMAR_STREAM_URL       = f"{_GRAMMAR_BASE}/stream-grammar"
 # Sentence-level LRU cache
 # ---------------------------------------------------------------------------
 
-_CACHE_MAX = 100
+_CACHE_MAX  = 100
+_CACHE_FILE = os.path.join(os.path.dirname(__file__), "sentence_cache.json")
 
 
 class _LRUCache:
@@ -81,6 +87,36 @@ class _LRUCache:
 
 _trans_cache = _LRUCache()
 _gram_cache  = _LRUCache()
+
+
+def _load_caches() -> None:
+    if not os.path.exists(_CACHE_FILE):
+        return
+    try:
+        with open(_CACHE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for k, v in data.get("trans", {}).items():
+            _trans_cache.set(k, v)
+        for k, v in data.get("gram", {}).items():
+            _gram_cache.set(k, v)
+        logger.info(f"[CACHE] Restaurado: {len(_trans_cache._data)} traducciones + "
+                    f"{len(_gram_cache._data)} gramáticas desde disco")
+    except Exception as e:
+        logger.warning(f"[CACHE] No se pudo cargar el cache: {e}")
+
+
+def _save_caches() -> None:
+    try:
+        data = {
+            "trans": dict(_trans_cache._data),
+            "gram":  dict(_gram_cache._data),
+        }
+        with open(_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        logger.info(f"[CACHE] Guardado: {len(_trans_cache._data)} traducciones + "
+                    f"{len(_gram_cache._data)} gramáticas en disco")
+    except Exception as e:
+        logger.warning(f"[CACHE] No se pudo guardar el cache: {e}")
 
 
 def _extract_sentence(context: str, target_word: str, original_word: str = "") -> str:
@@ -425,7 +461,7 @@ async def warm_page_ep(request: WarmPageRequest):
             queued_gram += 1
 
     logger.info(f"[WARM-PAGE] dict={dict_warmed} trans={queued_trans} gram={queued_gram}")
-    return {"dict_warmed": dict_warmed, "trans_queued": queued_trans, "gram_queued": queued_gram}
+    return {"dict_warmed": dict_warmed, "trans_queued": queued_trans, "gram_queued": queued_gram, "epoch": _SERVER_EPOCH}
 
 
 @app.post("/analyze-dict")

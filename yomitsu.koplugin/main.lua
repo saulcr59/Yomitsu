@@ -67,9 +67,29 @@ local CACHE_MAX   = 50
 -- Page context cache keyed by "cbz_path:page_no" → GPT scene description.
 -- Populated in background after first word per page; used for all subsequent lookups.
 local _page_ctx_cache     = {}
-local _warmed_pages       = {}  -- pages already sent to /warm-page this navigation
+local _warmed_pages       = {}  -- pages already confirmed warm by server
 local _last_page_key      = nil -- resets _warmed_pages on page change
+local _server_epoch       = nil -- server startup epoch; reset _warmed_pages on change
 local _show_trans_details = false  -- romaji+ES hidden by default; toggled by button
+
+-- Call after every warm-page response. If the server epoch changed (restart),
+-- clears _warmed_pages so all pages get re-warmed with the fresh server cache.
+local function _on_warm_page_response(code, body, page_key)
+    if code ~= 200 or not body then return end
+    local ok, data = pcall(json.decode, body)
+    if not ok or type(data) ~= "table" then return end
+    local epoch = data.epoch
+    if epoch and epoch ~= _server_epoch then
+        if _server_epoch then
+            logger.info("[YOMITSU] Server reiniciado (epoch cambió), limpiando warmed_pages")
+            _warmed_pages = {}
+        end
+        _server_epoch = epoch
+    end
+    if page_key then
+        _warmed_pages[page_key] = true
+    end
+end
 
 -- Map KOReader locale (e.g. "es_ES") to a full language name for AI response prompts.
 local function _get_response_language()
@@ -110,17 +130,25 @@ local function _page_key(scope)
 end
 
 
--- Returns all OCR text from the current mokuro page as a single string, or "".
+-- Returns all OCR text from the specified (or current) Mokuro page as a string.
 -- Data layout (from mokuroreader source):
 --   ui.mokuro.mokuro_data.pages[page_no].blocks[i].lines = {"text", ...}
 --   ui.mokuro.parser:getPageData(mokuro_data, page_no) handles index variants.
-local function _mokuro_page_text(scope)
-    local ui = scope and scope.ui
+local function _mokuro_page_text(scope, explicit_page_no)
+    local ui = scope and (scope.ui or scope)
     if not ui then return "" end
-    local mr = ui.mokuro
+    -- MokuroReader may register as "mokuro" or "mokuroreader"
+    local mr = ui.mokuro or ui.mokuroreader
+    if not mr then
+        -- last resort: search for any module with mokuro_data
+        for _, v in pairs(ui) do
+            if type(v) == "table" and v.mokuro_data then mr = v; break end
+        end
+    end
     if not mr or not mr.mokuro_data then return "" end
 
-    local page_no = (ui.paging and ui.paging.current_page)
+    local page_no = explicit_page_no
+        or (ui.paging and ui.paging.current_page)
         or (ui.view and ui.view.state and ui.view.state.page)
         or 1
 
@@ -1734,12 +1762,12 @@ local function yomitsuInterceptor(scope, text, ...)
             logger.info("[YOMITSU] warm-page trigger: key=" .. tostring(cur_page_key)
                 .. " page_ctx=" .. #page_ctx .. "b context=" .. #context .. "b")
             if warm_text and #warm_text > 1 then
-                _warmed_pages[cur_page_key] = true
                 async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
                     json.encode({ text = warm_text, response_language = _get_response_language() }), nil, 30,
                     function(code, body)
                         logger.info("[YOMITSU] warm-page response: code=" .. tostring(code)
                             .. " body=" .. tostring(body and body:sub(1, 120)))
+                        _on_warm_page_response(code, body, cur_page_key)
                     end)
             else
                 logger.warn("[YOMITSU] warm-page: no text available to warm")
@@ -2214,23 +2242,26 @@ function Yomitsu:onPageUpdate(pageno)
     if _warmed_pages[cur_page_key] then return end
 
     -- Try to read Mokuro OCR text for this page.
+    -- Pass pageno explicitly so we don't depend on paging.current_page timing.
     if not _page_ctx_cache[cur_page_key] then
-        local fake_scope = { ui = ui }
-        local ok, text = pcall(_mokuro_page_text, fake_scope)
+        local ok, text = pcall(_mokuro_page_text, ui, pageno)
         if ok and type(text) == "string" and text ~= "" then
             _page_ctx_cache[cur_page_key] = text
             logger.info("[YOMITSU] OCR auto-cacheado: " .. #text .. "b p=" .. tostring(pageno))
+        else
+            logger.warn("[YOMITSU] onPageUpdate: sin OCR p=" .. tostring(pageno)
+                .. " ok=" .. tostring(ok) .. " len=" .. tostring(type(text) == "string" and #text or "nil"))
         end
     end
 
     local warm_text = _page_ctx_cache[cur_page_key]
-    if not warm_text or #warm_text <= 1 then return end  -- no OCR text; will warm on first tap
+    if not warm_text or #warm_text <= 1 then return end
 
-    _warmed_pages[cur_page_key] = true
     async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
         json.encode({ text = warm_text, response_language = _get_response_language() }), nil, 30,
-        function(code, _body)
-            logger.info("[YOMITSU] warm-page auto: " .. tostring(code) .. " p=" .. tostring(pageno))
+        function(code, body)
+            logger.info("[YOMITSU] warm-page auto OK: " .. tostring(code) .. " p=" .. tostring(pageno))
+            _on_warm_page_response(code, body, cur_page_key)
         end)
 end
 
