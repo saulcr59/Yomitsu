@@ -144,6 +144,8 @@ def _extract_sentence(context: str, target_word: str, original_word: str = "") -
 
 def _remap_star(grammar_text: str, old_target: str, new_target: str) -> str:
     """Move the ★ marker from old_target's DESGLOSE entry to new_target's."""
+    # Models sometimes emit "- ★ element" instead of "★ element" — normalize.
+    grammar_text = re.sub(r'^\s*-\s*★\s*', '★ ', grammar_text, flags=re.MULTILINE)
     if old_target == new_target:
         return grammar_text
     lines = grammar_text.split('\n')

@@ -49,7 +49,8 @@ Treat compound structures as a single entry: \
 〜ていた, 〜ではない, 〜のだ, 〜ようとする, 〜てしまう, 〜てみる, \
 〜ておく, 〜ことができる, 〜なければならない, 〜てもいい, and similar. \
 Exactly one entry carries ★ at the start: the target word's entry; \
-if it is part of a compound structure, ★ goes on that complete structure.
+if it is part of a compound structure, ★ goes on that complete structure. \
+The ★ REPLACES the leading "- ": write "★ ELEMENT…", never "- ★ ELEMENT…".
 The [Nx] field indicates the JLPT level of the vocabulary or grammatical pattern (N5/N4/N3/N2/N1). \
 If the element has no JLPT classification, omit the [Nx] field entirely.
 Each explanation must include:
@@ -71,7 +72,9 @@ Write separate bullet points (•), never continuous prose. Cover:
 
 ROMAJI:
 A single line. Hepburn romanization of the analyzed sentence. \
-No translation, no explanations, no extra parentheses.\
+No translation, no explanations, no extra parentheses. \
+Nothing after this line — never output the ─── separator (it only marks \
+the end of the template above).\
 """
 
 

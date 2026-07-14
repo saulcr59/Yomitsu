@@ -596,7 +596,7 @@ local function _grammar_lines(text)
             first = false
             parts[#parts+1] = string.format(
                 '<p style="margin:%s 0 0.1em 0"><b>%s</b></p>', top, _html_esc(line))
-        elseif line:match("^%- ") or line:match("^• ") then
+        elseif line:match("^%- ") or line:match("^• ") or line:match("^★") then
             local content = line:match("^[%-%•]%s+(.*)")
             content = content or line
             local is_star = content:match("^★") ~= nil
