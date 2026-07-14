@@ -2496,14 +2496,10 @@ function Yomitsu:onPageUpdate(pageno)
     -- Keep _last_page_key in sync so yomitsuInterceptor won't reset _warmed_pages
     -- on the first word tap and send a redundant warm request.
     _last_page_key = cur_page_key
-    if _warmed_pages[cur_page_key] then
-        -- Already warm (typically prefetched): just keep the chain going.
-        _schedule_prefetch(ui, pageno)
-        return
-    end
+    local revalidate = _warmed_pages[cur_page_key]
     -- Landed on a page whose prefetch vision is in flight: wait for it instead
     -- of duplicating the call; its completion will warm the page.
-    if _page_vision_pending[cur_page_key] then return end
+    if not revalidate and _page_vision_pending[cur_page_key] then return end
 
     -- Try to read Mokuro OCR text for this page.
     -- Pass pageno explicitly so we don't depend on paging.current_page timing.
@@ -2538,6 +2534,19 @@ function Yomitsu:onPageUpdate(pageno)
                     _schedule_prefetch(ui, pageno)
                 end
             end)
+    end
+
+    -- Revisit of a page we believe is warm: send a revalidation warm anyway.
+    -- On a truly cached page it costs the server nothing (0/0/0), but if the
+    -- server restarted with empty caches, its response carries a new epoch →
+    -- _on_warm_page_response drops the stale warm flags and this very request
+    -- re-queues the page's prewarm. Delayed with a still-on-page check so
+    -- skimming back through read pages doesn't fire one request per flip.
+    if revalidate then
+        UIManager:scheduleIn(1.5, function()
+            if _current_page(ui) == pageno then send_warm() end
+        end)
+        return
     end
 
     if _page_analyzed[cur_page_key] then
