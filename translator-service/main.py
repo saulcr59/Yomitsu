@@ -50,12 +50,22 @@ def _extract_sentence(context: str, target_word: str, original_word: str = "") -
     return context.strip()
 
 
+def _ctx_kind(page_context: str) -> str:
+    """Classify the page_context received: 'vision' when it is the vision
+    model's output (always starts with a TRANSCRIPT: section), 'ocr' for raw
+    Mokuro text, 'none' when there is no page context at all."""
+    if not page_context:
+        return "none"
+    return "vision" if "TRANSCRIPT:" in page_context else "ocr"
+
+
 class TranslationRequest(BaseModel):
     context_phrase: str
     target_word: str
     original_word: str = ""
     part_of_speech: str
     page_context: str = ""
+    source: str = "tap"  # "tap" | "prewarm" — echoed into the stream meta
 
 
 @app.get("/health")
@@ -92,7 +102,9 @@ async def stream_translate(request: TranslationRequest):
     user_msg = _build_user_msg(sentence, request.page_context)
     logger.info(f"[TRANS-STREAM] '{request.target_word}' | page_ctx={bool(request.page_context)}")
 
-    meta = json.dumps({"s": sentence, "m": MODEL}, ensure_ascii=False)
+    meta = json.dumps({"s": sentence, "m": MODEL,
+                       "src": request.source,
+                       "ctx": _ctx_kind(request.page_context)}, ensure_ascii=False)
 
     async def generate():
         yield f"\x01{meta}\x01\n"

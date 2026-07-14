@@ -142,6 +142,15 @@ def _extract_sentence(context: str, target_word: str, original_word: str = "") -
     return context.strip()
 
 
+def _ctx_kind(page_context: str) -> str:
+    """Classify the page_context used for an AI call: 'vision' when it is the
+    vision model's output (always starts with a TRANSCRIPT: section), 'ocr'
+    for raw Mokuro text, 'none' when there is no page context at all."""
+    if not page_context:
+        return "none"
+    return "vision" if "TRANSCRIPT:" in page_context else "ocr"
+
+
 def _remap_star(grammar_text: str, old_target: str, new_target: str) -> str:
     """Move the ★ marker from old_target's DESGLOSE entry to new_target's."""
     # Models sometimes emit "- ★ element" instead of "★ element" — normalize.
@@ -236,6 +245,27 @@ async def health():
     return {"status": "ok"}
 
 
+@app.post("/clear-cache")
+async def clear_cache():
+    """Empties the AI caches (translations, grammar, vision page analyses) and
+    deletes the persisted sentence_cache.json. Triggered from the KOReader menu."""
+    counts = {
+        "trans":   len(_trans_cache._data),
+        "gram":    len(_gram_cache._data),
+        "pagectx": len(_pagectx_cache),
+    }
+    _trans_cache._data.clear()
+    _gram_cache._data.clear()
+    _pagectx_cache.clear()
+    try:
+        if os.path.exists(_CACHE_FILE):
+            os.remove(_CACHE_FILE)
+    except Exception as e:
+        logger.warning(f"[CACHE] No se pudo borrar {_CACHE_FILE}: {e}")
+    logger.info(f"[CACHE] Limpiado a petición del cliente: {counts}")
+    return {"cleared": counts}
+
+
 @app.post("/analyze-page-context")
 async def analyze_page_context(request: PageContextRequest):
     """Analyzes a manga page with vision: corrected transcript of every bubble in
@@ -313,6 +343,7 @@ async def analyze_translation_stream_ep(request: AnalyzeAiRequest):
         "original_word":  request.original_word,
         "part_of_speech": request.part_of_speech,
         "page_context":   request.page_context,
+        "source":         "tap",
     }
     chunks: list[str] = []
 
@@ -362,7 +393,8 @@ async def analyze_grammar_stream_ep(request: AnalyzeAiRequest):
     async def generate():
         nonlocal meta_str
         _, romaji_sentence = await _tokenize(request.context_phrase, request.target_word)
-        meta = {"romaji": romaji_sentence, "model": GRAMMAR_MODEL}
+        meta = {"romaji": romaji_sentence, "model": GRAMMAR_MODEL,
+                "src": "tap", "ctx": _ctx_kind(request.page_context)}
         meta_str = json.dumps(meta, ensure_ascii=False)
         yield f"\x01{meta_str}\x01\n"
         try:
@@ -414,7 +446,8 @@ async def _prewarm_sentence_grammar(sentence: str, target_word: str, part_of_spe
         "response_language": response_language,
     }
     _, romaji_sentence = await _tokenize(sentence, target_word)
-    meta_str = json.dumps({"romaji": romaji_sentence, "model": GRAMMAR_MODEL}, ensure_ascii=False)
+    meta_str = json.dumps({"romaji": romaji_sentence, "model": GRAMMAR_MODEL,
+                           "src": "prewarm", "ctx": _ctx_kind(page_context)}, ensure_ascii=False)
     chunks: list[str] = []
     try:
         async with httpx.AsyncClient(timeout=35.0) as client:
@@ -444,6 +477,7 @@ async def _prewarm_sentence_translation(sentence: str, page_context: str = "") -
         "original_word":  "",
         "part_of_speech": "",
         "page_context":   page_context,
+        "source":         "prewarm",
     }
     chunks: list[str] = []
     try:

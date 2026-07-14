@@ -550,6 +550,19 @@ local function _html_esc(s)
     return s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
 end
 
+-- Small gray footer: "model · tap/prewarm · ctx:vision". src/ctx come from the
+-- service stream meta and reflect how the result was GENERATED (cache replays
+-- the original values); missing fields (old cache entries) are simply omitted.
+local function _ai_footer(model, src, ctx)
+    local tags = {}
+    if model and model ~= "" then tags[#tags+1] = model end
+    if src   and src   ~= "" then tags[#tags+1] = src end
+    if ctx   and ctx   ~= "" then tags[#tags+1] = "ctx:" .. ctx end
+    if #tags == 0 then return "" end
+    return '<p style="margin-top:0.3em"><font color="gray"><small>'
+        .. _html_esc(table.concat(tags, " · ")) .. '</small></font></p>'
+end
+
 local function _build_kanji_html(kanji_list)
     if not kanji_list or #kanji_list == 0 then return "" end
     local lines = {}
@@ -1289,10 +1302,7 @@ local function buildTranslationHtml(word, reading, ai, original_word, frequency,
         body = body
             .. '<p style="border-left:3px solid #aaa; padding-left:0.5em; margin:0.1em 0 0.4em 0">'
             .. translation .. '</p>\n'
-        body = body
-            .. '<p style="margin-top:0.3em"><font color="gray"><small>'
-            .. _html_esc(ai.model_used or _("unknown"))
-            .. '</small></font></p>\n'
+        body = body .. _ai_footer(ai.model_used or _("unknown"), ai.src, ai.ctx) .. '\n'
     end
 
     -- Grammar loading indicator
@@ -1360,22 +1370,31 @@ local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original
             .. translation .. '</p>'
         body = body .. table.concat(block, "\n") .. "\n"
 
-        body = body
-            .. '<p style="margin-top:0.3em"><font color="gray"><small>'
-            .. _html_esc(ai.model_used or _("unknown"))
-            .. '</small></font></p>'
+        body = body .. _ai_footer(ai.model_used or _("unknown"), ai.src, ai.ctx)
     end
 
     -- 4. Grammar section (always visible; not affected by _show_trans_details)
     if not opts.hide_grammar then
         local gram_text = grammar and grammar.analysis or ""
         if gram_text ~= "" then
-            local gram_model = (grammar and grammar.model) or ""
-            local gram_footer = gram_model ~= "" and
-                ('\n<p style="margin-top:0.3em"><font color="gray"><small>'
-                .. _html_esc(gram_model) .. '</small></font></p>') or ""
+            local f = _ai_footer(grammar and grammar.model, grammar and grammar.src,
+                grammar and grammar.ctx)
+            local gram_footer = f ~= "" and ("\n" .. f) or ""
             body = body .. '<hr/>\n' .. _grammar_lines(gram_text) .. gram_footer .. "\n"
         end
+    end
+
+    -- 5. Page context (temporary debug block): the context the AI services get
+    -- for this page — vision transcript+scene when available, raw OCR otherwise —
+    -- so the vision output (speakers, reading order) can be verified in place.
+    local pctx = opts.page_ctx or ""
+    if pctx ~= "" then
+        local kind = opts.page_ctx_vision and "vision" or "ocr"
+        body = body .. '<hr/>\n'
+            .. '<p style="margin:0.3em 0 0.1em 0"><b><small>'
+            .. _("Page context") .. ' (' .. kind .. ')</small></b></p>\n'
+            .. '<p style="margin:0.1em 0"><font color="#666"><small>'
+            .. _html_esc(pctx):gsub("\n", "<br/>") .. '</small></font></p>\n'
     end
 
     return _XHTML_HEAD .. body .. _XHTML_TAIL
@@ -1843,10 +1862,12 @@ local function yomitsuInterceptor(scope, text, ...)
         -- to avoid e-ink full-screen refreshes during generation.
         local trans_meta_done, trans_meta_buf = false, ""
         local trans_buf, trans_source, trans_model = "", "", ""
+        local trans_src, trans_ctx = "", ""  -- "tap"/"prewarm", "vision"/"ocr"/"none"
         local trans_done = false
 
         local gram_meta_done, gram_meta_buf = false, ""
         local gram_buf, gram_romaji, gram_model = "", "", ""
+        local gram_src, gram_ctx = "", ""  -- "tap"/"prewarm", "vision"/"ocr"/"none"
         local gram_done = false
         local ask_extra_html = ""  -- appended by Ask AI to the viewer content
 
@@ -1857,10 +1878,19 @@ local function yomitsuInterceptor(scope, text, ...)
                 translation_and_nuance = trans_buf ~= "" and trans_buf or _("No translation."),
                 source_sentence        = trans_source,
                 model_used             = trans_model ~= "" and trans_model or "Hy-MT2-7B",
+                src                    = trans_src,
+                ctx                    = trans_ctx,
             }
             local opts = { hide_translation = not show_trans, hide_grammar = not show_gram }
+            -- Page-context debug block (shown after the grammar section): read the
+            -- caches live so a vision analysis that finishes after the tap shows up.
+            if cur_page_key then
+                opts.page_ctx        = _page_ctx_cache[cur_page_key] or ""
+                opts.page_ctx_vision = _page_analyzed[cur_page_key] or false
+            end
             local gram_obj = gram_done
-                and { analysis = gram_buf, model = gram_model ~= "" and gram_model or "gpt-4.1-mini" }
+                and { analysis = gram_buf, model = gram_model ~= "" and gram_model or "gpt-4.1-mini",
+                      src = gram_src, ctx = gram_ctx }
                 or nil
             local html
             if gram_done or not show_gram then
@@ -1994,8 +2024,10 @@ local function yomitsuInterceptor(scope, text, ...)
                 if meta ~= "" then
                     local ok_m, obj = pcall(json.decode, meta)
                     if ok_m and obj then
-                        trans_source = obj.s or ""
-                        trans_model  = obj.m or ""
+                        trans_source = obj.s   or ""
+                        trans_model  = obj.m   or ""
+                        trans_src    = obj.src or ""
+                        trans_ctx    = obj.ctx or ""
                     end
                 end
                 trans_meta_done = true
@@ -2027,6 +2059,8 @@ local function yomitsuInterceptor(scope, text, ...)
                     if ok_m and obj then
                         gram_romaji = obj.romaji or ""
                         gram_model  = obj.model  or ""
+                        gram_src    = obj.src    or ""
+                        gram_ctx    = obj.ctx    or ""
                     end
                 end
                 gram_meta_done = true
@@ -2452,6 +2486,41 @@ function Yomitsu:_testConnection()
     UIManager:show(InfoMessage:new{ text = msg, timeout = 5 })
 end
 
+-- Clears every Yomitsu cache: the plugin's session caches (dict phase-1, page
+-- OCR/context, warmed flags) and the orchestrator's persisted AI caches
+-- (translations, grammar, vision pages) via POST /clear-cache.
+function Yomitsu:_clearCache()
+    local ConfirmBox = require("ui/widget/confirmbox")
+    UIManager:show(ConfirmBox:new{
+        text = _("Clear all cached data?\nAI results will be regenerated on demand (this costs API calls)."),
+        ok_text = _("Clear"),
+        ok_callback = function()
+            _cache, _cache_keys = {}, {}
+            _page_ocr_cache, _page_ctx_cache = {}, {}
+            _page_analyzed, _page_vision_pending = {}, {}
+            _warmed_pages, _last_page_key = {}, nil
+            async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/clear-cache", "{}", nil, 10,
+                function(code, body)
+                    local msg
+                    if code == 200 and body then
+                        local ok, data = pcall(json.decode, body)
+                        local c = ok and type(data) == "table" and data.cleared or nil
+                        if c then
+                            msg = string.format(
+                                _("Cache cleared.\nServer: %d translations, %d grammar, %d pages."),
+                                c.trans or 0, c.gram or 0, c.pagectx or 0)
+                        else
+                            msg = _("Cache cleared.")
+                        end
+                    else
+                        msg = _("Local cache cleared.\nServer did not respond — its cache was NOT cleared.")
+                    end
+                    UIManager:show(InfoMessage:new{ text = msg, timeout = 5 })
+                end)
+        end,
+    })
+end
+
 function Yomitsu:addToMainMenu(menu_items)
     local order = require("ui/elements/reader_menu_order")
     if order.tools and order.tools[1] ~= "yomitsu" then
@@ -2638,6 +2707,11 @@ function Yomitsu:addToMainMenu(menu_items)
             {
                 text = _("Test connection"),
                 callback = function() self:_testConnection() end,
+            },
+            {
+                text = _("Clear cache"),
+                keep_menu_open = true,
+                callback = function() self:_clearCache() end,
             },
             {
                 text = _("Yomitsu AI"),
