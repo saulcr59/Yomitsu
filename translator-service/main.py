@@ -144,6 +144,62 @@ async def stream_translate(request: TranslationRequest):
     return StreamingResponse(generate(), media_type="text/plain")
 
 
+PAGE_SYSTEM_PROMPT = """\
+You are an expert Japanese-to-Spanish translator specializing in manga and anime.
+You will receive every line of one manga page, numbered, plus page context.
+Translate EACH numbered line to Spanish independently, preserving the character's
+voice, speech register and personality (casual, rough, polite, childlike, archaic, etc.).
+Use the page context ONLY to resolve ambiguity: who is speaking, who is addressed,
+tone, and what pronouns or omitted subjects refer to.
+STRICT FIDELITY RULE: every content word (verb, noun, adjective) in your Spanish
+must correspond to a word actually present in that Japanese line. Never import
+verbs, actions or objects from other lines or from the page context. If a line
+expresses a state or emotion, translate the state itself — never the visible
+action that expresses it elsewhere on the page.
+Output format: one line per input line, same numbering, ONLY the translation:
+1. <Spanish translation of line 1>
+2. <Spanish translation of line 2>
+No explanations, no notes, no omissions — every input number must appear."""
+
+
+class PageTranslationRequest(BaseModel):
+    sentences: list[str]
+    page_context: str = ""
+
+
+@app.post("/translate-page")
+async def translate_page(request: PageTranslationRequest):
+    """Translate every line of a manga page in ONE model call (used by the
+    orchestrator's warm-page prewarm). Returns {"1": "...", "2": "..."} keyed
+    by the 1-based index of each input sentence."""
+    if not request.sentences:
+        return {"translations": {}, "model": MODEL}
+    numbered = "\n".join(f"{i}. {s}" for i, s in enumerate(request.sentences, 1))
+    msg = ""
+    if request.page_context:
+        msg += f"Page context:\n{request.page_context}\n\n"
+    msg += f"Translate these lines to Spanish:\n{numbered}"
+    logger.info(f"[TRANS-PAGE] {len(request.sentences)} líneas | ctx={_ctx_kind(request.page_context)}")
+
+    response = await _chat_create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": PAGE_SYSTEM_PROMPT},
+            {"role": "user",   "content": msg},
+        ],
+        max_completion_tokens=4000,
+        reasoning_effort="none",
+    )
+    raw = (response.choices[0].message.content or "").strip()
+    translations: dict[str, str] = {}
+    for line in raw.splitlines():
+        m = re.match(r'^\s*(\d+)[.)]\s*(.+)$', line)
+        if m:
+            translations[m.group(1)] = m.group(2).strip()
+    logger.info(f"[TRANS-PAGE] OK — {len(translations)}/{len(request.sentences)} líneas")
+    return {"translations": translations, "model": MODEL}
+
+
 def _build_user_msg(sentence: str, page_context: str) -> str:
     msg = ""
     if page_context:

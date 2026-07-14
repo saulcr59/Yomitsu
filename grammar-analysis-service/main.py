@@ -129,6 +129,23 @@ class GrammarRequest(BaseModel):
     part_of_speech: str
     page_context: str = ""
     response_language: str = "English"
+    prompt_cache_key: str = ""  # groups same-page calls on one OpenAI cache node
+
+
+def _create_kwargs(request: "GrammarRequest", sentence: str, stream: bool = False) -> dict:
+    kwargs = dict(
+        model=MODEL,
+        messages=_build_messages(sentence, request.target_word, request.part_of_speech,
+                                 request.page_context, request.response_language),
+        max_completion_tokens=2500,
+        reasoning_effort="low",
+    )
+    if stream:
+        kwargs["stream"] = True
+    if request.prompt_cache_key:
+        # extra_body keeps this compatible with SDKs that predate the param
+        kwargs["extra_body"] = {"prompt_cache_key": request.prompt_cache_key}
+    return kwargs
 
 
 @app.get("/health")
@@ -142,12 +159,7 @@ async def analyze_grammar(request: GrammarRequest):
     logger.info(f"[GRAMMAR] '{request.target_word}' en '{sentence}'")
 
     try:
-        response = await _chat_create(
-            model=MODEL,
-            messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context, request.response_language),
-            max_completion_tokens=2500,
-            reasoning_effort="low",
-        )
+        response = await _chat_create(**_create_kwargs(request, sentence))
         raw = (response.choices[0].message.content or "").strip()
         logger.info(f"[GRAMMAR] OK — {len(raw)} chars")
 
@@ -177,13 +189,7 @@ async def stream_grammar(request: GrammarRequest):
 
     async def generate():
         try:
-            response = await _chat_create(
-                model=MODEL,
-                messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context, request.response_language),
-                max_completion_tokens=2500,
-                reasoning_effort="low",
-                stream=True,
-            )
+            response = await _chat_create(**_create_kwargs(request, sentence, stream=True))
             async for chunk in response:
                 delta = chunk.choices[0].delta.content
                 if delta:

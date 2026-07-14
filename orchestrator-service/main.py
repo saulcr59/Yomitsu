@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -57,7 +58,12 @@ _GRAMMAR_BASE    = os.environ.get("GRAMMAR_URL",    "http://localhost:8003")
 DICT_TOKENIZE_URL        = f"{_DICT_BASE}/tokenize"
 DICTIONARY_SERVICE_URL   = f"{_DICT_BASE}/extract-word"
 TRANSLATOR_STREAM_URL    = f"{_TRANSLATOR_BASE}/stream-translate"
+TRANSLATOR_PAGE_URL      = f"{_TRANSLATOR_BASE}/translate-page"
 GRAMMAR_STREAM_URL       = f"{_GRAMMAR_BASE}/stream-grammar"
+
+# Prewarm calls used to fire all at once; OpenAI intermittently rejects those
+# bursts (transient 401s), so background prewarms share this semaphore.
+_PREWARM_SEM = asyncio.Semaphore(4)
 
 # ---------------------------------------------------------------------------
 # Sentence-level LRU cache
@@ -172,6 +178,15 @@ def _cacheable_translation(stream_text: str) -> bool:
 
 def _cacheable_grammar(text: str) -> bool:
     return bool(text.strip()) and _GRAMMAR_ERROR_MARKER not in text
+
+
+def _gram_prompt_cache_key(page_context: str) -> str:
+    """OpenAI prompt_cache_key for grammar calls: all grammar requests that share
+    a page context share the long static prefix (system prompt + page context),
+    so routing them to the same cache node maximizes automatic prompt caching."""
+    if not page_context:
+        return ""
+    return "yomitsu-gram-" + hashlib.sha1(page_context.encode("utf-8")).hexdigest()[:16]
 
 
 def _ctx_kind(page_context: str) -> str:
@@ -421,6 +436,7 @@ async def analyze_grammar_stream_ep(request: AnalyzeAiRequest):
         "part_of_speech":    request.part_of_speech,
         "page_context":      request.page_context,
         "response_language": request.response_language,
+        "prompt_cache_key":  _gram_prompt_cache_key(request.page_context),
     }
     chunks: list[str] = []
     meta_str: str = ""
@@ -482,17 +498,19 @@ async def _prewarm_sentence_grammar(sentence: str, target_word: str, part_of_spe
         "part_of_speech":    part_of_speech,
         "page_context":      page_context,
         "response_language": response_language,
+        "prompt_cache_key":  _gram_prompt_cache_key(page_context),
     }
     _, romaji_sentence = await _tokenize(sentence, target_word)
     meta_str = json.dumps({"romaji": romaji_sentence, "model": GRAMMAR_MODEL,
                            "src": "prewarm", "ctx": _ctx_kind(page_context)}, ensure_ascii=False)
     chunks: list[str] = []
     try:
-        async with httpx.AsyncClient(timeout=35.0) as client:
-            async with client.stream("POST", GRAMMAR_STREAM_URL, json=grammar_payload) as resp:
-                async for chunk in resp.aiter_text():
-                    if chunk:
-                        chunks.append(chunk)
+        async with _PREWARM_SEM:
+            async with httpx.AsyncClient(timeout=35.0) as client:
+                async with client.stream("POST", GRAMMAR_STREAM_URL, json=grammar_payload) as resp:
+                    async for chunk in resp.aiter_text():
+                        if chunk:
+                            chunks.append(chunk)
         text = "".join(chunks)
         if _cacheable_grammar(text):
             _gram_cache.set(sentence, {
@@ -522,11 +540,12 @@ async def _prewarm_sentence_translation(sentence: str, page_context: str = "") -
     }
     chunks: list[str] = []
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            async with client.stream("POST", TRANSLATOR_STREAM_URL, json=payload) as resp:
-                async for chunk in resp.aiter_text():
-                    if chunk:
-                        chunks.append(chunk)
+        async with _PREWARM_SEM:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                async with client.stream("POST", TRANSLATOR_STREAM_URL, json=payload) as resp:
+                    async for chunk in resp.aiter_text():
+                        if chunk:
+                            chunks.append(chunk)
         full = "".join(chunks)
         if _cacheable_translation(full):
             _trans_cache.set(sentence, full)
@@ -535,6 +554,43 @@ async def _prewarm_sentence_translation(sentence: str, page_context: str = "") -
             logger.warning(f"[TRANS-PREWARM-NOT-CACHED] respuesta vacía para '{sentence[:50]}'")
     except Exception as e:
         logger.error(f"[TRANS-PREWARM] '{sentence[:30]}': {e}")
+
+
+async def _prewarm_page_translations(sentences: list[str], page_context: str) -> None:
+    """Translate every pending sentence of a page in ONE model call and store
+    per-sentence entries in _trans_cache, in the same stream format the live
+    endpoint caches (meta header + text) so tap-time replay is identical.
+    Falls back to per-sentence prewarm for the whole page (batch call failed)
+    or for individual lines the model skipped."""
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            res = await client.post(TRANSLATOR_PAGE_URL, json={
+                "sentences":    sentences,
+                "page_context": page_context,
+            })
+            res.raise_for_status()
+            data = res.json()
+    except Exception as e:
+        logger.error(f"[TRANS-PAGE-PREWARM] lote falló ({e}); fallback por frase")
+        for s in sentences:
+            asyncio.create_task(_prewarm_sentence_translation(s, page_context))
+        return
+
+    translations = data.get("translations", {}) or {}
+    model = data.get("model", "")
+    ctx = _ctx_kind(page_context)
+    cached = 0
+    for i, s in enumerate(sentences, 1):
+        text = (translations.get(str(i)) or "").strip()
+        if text:
+            if _trans_cache.get(s) is None:
+                meta = json.dumps({"s": s, "m": model, "src": "prewarm", "ctx": ctx},
+                                  ensure_ascii=False)
+                _trans_cache.set(s, f"\x01{meta}\x01\n{text}")
+                cached += 1
+        else:
+            asyncio.create_task(_prewarm_sentence_translation(s, page_context))
+    logger.info(f"[TRANS-PAGE-PREWARM] {cached}/{len(sentences)} frases en 1 llamada")
 
 
 @app.post("/warm-page")
@@ -552,24 +608,28 @@ async def warm_page_ep(request: WarmPageRequest):
         logger.error(f"[WARM-PAGE-DICT] {e}")
 
     # 2. Pre-warm translation and grammar caches for every sentence.
-    #    Grammar targets come from the dict service (best token per sentence).
+    #    Translations go in ONE batched model call for the whole page (the page
+    #    context is sent once instead of N times). Grammar stays per-sentence
+    #    (each needs its own long breakdown) but throttled by _PREWARM_SEM.
     #    Launched as background tasks so this endpoint returns immediately.
-    queued_trans = 0
-    queued_gram  = 0
+    to_translate: list[str] = []
+    queued_gram = 0
 
     for item in dict_result.get("sentence_targets", []):
         sentence = item["sentence"]
-        if _trans_cache.get(sentence) is None:
-            asyncio.create_task(_prewarm_sentence_translation(sentence, request.page_context))
-            queued_trans += 1
+        if _trans_cache.get(sentence) is None and sentence not in to_translate:
+            to_translate.append(sentence)
         if _gram_cache.get(sentence) is None:
             asyncio.create_task(_prewarm_sentence_grammar(
                 sentence, item["target_word"], item["part_of_speech"],
                 request.response_language, request.page_context))
             queued_gram += 1
 
-    logger.info(f"[WARM-PAGE] dict={dict_warmed} trans={queued_trans} gram={queued_gram}")
-    return {"dict_warmed": dict_warmed, "trans_queued": queued_trans, "gram_queued": queued_gram, "epoch": _SERVER_EPOCH}
+    if to_translate:
+        asyncio.create_task(_prewarm_page_translations(to_translate, request.page_context))
+
+    logger.info(f"[WARM-PAGE] dict={dict_warmed} trans={len(to_translate)} gram={queued_gram}")
+    return {"dict_warmed": dict_warmed, "trans_queued": len(to_translate), "gram_queued": queued_gram, "epoch": _SERVER_EPOCH}
 
 
 @app.post("/analyze-dict")

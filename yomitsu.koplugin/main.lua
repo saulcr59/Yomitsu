@@ -969,8 +969,11 @@ local function get_sentence_context(scope, word, extra_args)
         end
         -- mokuroreader injects getSelectedWordContext as a closure with
         -- prev_context/next_context captured — must be called, not read as fields.
+        -- 100 chars per side: enough to contain the full sentence, so the
+        -- server-side sentence extraction matches the warm-page cache keys
+        -- (20 truncated long bubbles and caused prewarm cache misses on tap).
         if type(hl.getSelectedWordContext) == "function" then
-            local ok, prev, nxt = pcall(hl.getSelectedWordContext, hl, 20)
+            local ok, prev, nxt = pcall(hl.getSelectedWordContext, hl, 100)
             if ok then
                 prev = prev or ""
                 nxt  = nxt  or ""
