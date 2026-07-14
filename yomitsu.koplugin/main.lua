@@ -23,7 +23,9 @@ local Yomitsu = WidgetContainer:extend{ name = "yomitsu", is_doc_only = true }
 -- Historial de búsquedas (últimas 20, guardadas en JSON)
 -- ---------------------------------------------------------------------------
 local HISTORY_PATH = DataStorage:getSettingsDir() .. "/yomitsu_history.json"
-local HISTORY_MAX  = 20
+local HISTORY_MAX  = 500  -- stored entries (counts survive until eviction)
+local HISTORY_TOP_SHOWN    = 15  -- "most looked up" section size
+local HISTORY_RECENT_SHOWN = 50  -- recent entries rendered in the tab
 -- The counter should mean "distinct times I ran into this word and didn't
 -- know it", not raw taps. A re-lookup does NOT bump it only when it is the
 -- same burst: same page AND less than this window (seconds) since the last
@@ -657,8 +659,8 @@ local function buildHistoryHtml(current_word)
     if #hist == 0 then
         return _XHTML_HEAD .. '<p>' .. _("No history yet.") .. '</p>' .. _XHTML_TAIL
     end
-    local lines = {}
-    for _, entry in ipairs(hist) do
+
+    local function entry_html(entry)
         local reading = (entry.reading and entry.reading ~= "") and
             (' <font color="gray">(' .. entry.reading .. ')</font>') or ""
         local date_str = entry.time and
@@ -666,12 +668,41 @@ local function buildHistoryHtml(current_word)
         local count_str = (entry.count and entry.count > 1) and
             (' <font color="#aaa"><small>×' .. tostring(entry.count) .. '</small></font>') or ""
         if entry.word == current_word then
-            lines[#lines+1] = '<p style="margin:0.15em 0; border-left:3px solid #000; padding-left:0.4em"><b>'
-                .. entry.word .. '</b>' .. reading .. count_str .. date_str .. '</p>'
-        else
-            lines[#lines+1] = '<p style="margin:0.15em 0"><b>'
+            return '<p style="margin:0.15em 0; border-left:3px solid #000; padding-left:0.4em"><b>'
                 .. entry.word .. '</b>' .. reading .. count_str .. date_str .. '</p>'
         end
+        return '<p style="margin:0.15em 0"><b>'
+            .. entry.word .. '</b>' .. reading .. count_str .. date_str .. '</p>'
+    end
+
+    local lines = {}
+
+    -- "Most looked up": words met on more than one occasion, by encounter
+    -- count — the natural study list.
+    local top = {}
+    for i = 1, #hist do
+        if (hist[i].count or 1) > 1 then top[#top+1] = hist[i] end
+    end
+    table.sort(top, function(a, b)
+        if (a.count or 1) ~= (b.count or 1) then return (a.count or 1) > (b.count or 1) end
+        return (a.ts or 0) > (b.ts or 0)
+    end)
+    if #top > 0 then
+        lines[#lines+1] = '<p style="margin:0.1em 0 0.2em 0"><b>' .. _("Most looked up") .. '</b></p>'
+        for i = 1, math.min(#top, HISTORY_TOP_SHOWN) do
+            lines[#lines+1] = entry_html(top[i])
+        end
+        lines[#lines+1] = '<hr/>'
+    end
+
+    lines[#lines+1] = '<p style="margin:0.3em 0 0.2em 0"><b>' .. _("Recent") .. '</b></p>'
+    local shown = math.min(#hist, HISTORY_RECENT_SHOWN)
+    for i = 1, shown do
+        lines[#lines+1] = entry_html(hist[i])
+    end
+    if #hist > shown then
+        lines[#lines+1] = '<p style="margin:0.3em 0"><font color="#aaa"><small>… +'
+            .. tostring(#hist - shown) .. ' ' .. _("older entries") .. '</small></font></p>'
     end
     return _XHTML_HEAD .. table.concat(lines, "\n") .. _XHTML_TAIL
 end
