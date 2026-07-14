@@ -14,7 +14,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 from openai import AsyncOpenAI
 
-load_dotenv()
+# override=True: .env is authoritative — otherwise a stale OPENAI_API_KEY
+# inherited from the launching shell survives .env edits and uvicorn reloads.
+load_dotenv(override=True)
 
 _SERVER_EPOCH = str(int(time.time()))
 
@@ -346,10 +348,14 @@ async def analyze_page_context(request: PageContextRequest):
         "Look at this manga page and output exactly two sections:\n\n"
         "TRANSCRIPT:\n"
         "Every speech bubble and text box in Japanese reading order (right to left, "
-        "top to bottom), one per line. Use the image to fix any OCR errors "
-        "(wrong kanji, merged furigana, bad line order). If the speaker is "
-        "identifiable, prefix the line with their name or role in brackets, "
-        "e.g. [店員] or [girl].\n\n"
+        "top to bottom), ONE PER LINE — put a real newline after every bubble, "
+        "never join two bubbles on the same line. Use the image to fix any OCR "
+        "errors (wrong kanji, merged furigana, bad line order). Prefix EVERY line "
+        "with the speaker in brackets: their name if known, otherwise a short role "
+        "like [man], [boy], [sign]; use [?] only if truly unidentifiable.\n"
+        "Format example:\n"
+        "[店員] いらっしゃいませ。\n"
+        "[girl] これください。\n\n"
         "SCENE:\n"
         "One or two sentences in English: who is present, who is speaking to whom, "
         "their relationship, the emotional tone, and any relevant action or setting.\n\n"

@@ -9,7 +9,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 
-load_dotenv()
+# override=True: .env is authoritative — otherwise a stale OPENAI_API_KEY
+# inherited from the launching shell survives .env edits and uvicorn reloads.
+load_dotenv(override=True)
 
 logging.basicConfig(
     level=logging.INFO,
