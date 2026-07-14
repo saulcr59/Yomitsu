@@ -71,9 +71,10 @@ _PREWARM_SEM = asyncio.Semaphore(4)
 # Sentence-level LRU cache
 # ---------------------------------------------------------------------------
 
-# ~2000 sentences ≈ 125 dense manga pages per cache. Grammar entries are the
-# biggest (~4KB each) → worst case ~10MB of RAM. Page contexts are unbounded.
-_CACHE_MAX  = 2000
+# Sized for re-reading old volumes: a manga volume is ~1200 sentences, so
+# 20000 holds ~15 volumes. Grammar entries are the biggest (~4KB each) →
+# worst case ~90MB of RAM / JSON on disk. Page contexts are unbounded.
+_CACHE_MAX  = 20000
 # Overridable so Docker can point it at a mounted volume that survives rebuilds.
 _CACHE_FILE = os.environ.get(
     "CACHE_FILE",
