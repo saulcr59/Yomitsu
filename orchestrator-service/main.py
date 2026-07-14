@@ -281,8 +281,8 @@ async def analyze_page_context(request: PageContextRequest):
         response = await _oai_client.chat.completions.create(
             model=VISION_MODEL,
             messages=[{"role": "user", "content": content}],
-            max_tokens=700,
-            temperature=0.2,
+            max_completion_tokens=2000,
+            reasoning_effort="low",
         )
         analysis = (response.choices[0].message.content or "").strip()
         if request.page_key and analysis:
@@ -551,7 +551,8 @@ async def ask_stream_ep(request: AskRequest):
             stream = await _oai_client.chat.completions.create(
                 model=GRAMMAR_MODEL,
                 messages=messages,
-                max_tokens=400,
+                max_completion_tokens=1500,
+                reasoning_effort="low",
                 stream=True,
             )
             async for chunk in stream:

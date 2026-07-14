@@ -127,8 +127,8 @@ async def analyze_grammar(request: GrammarRequest):
         response = await client.chat.completions.create(
             model=MODEL,
             messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context, request.response_language),
-            max_tokens=1000,
-            temperature=0.3,
+            max_completion_tokens=2500,
+            reasoning_effort="low",
         )
         raw = (response.choices[0].message.content or "").strip()
         logger.info(f"[GRAMMAR] OK — {len(raw)} chars")
@@ -162,8 +162,8 @@ async def stream_grammar(request: GrammarRequest):
             response = await client.chat.completions.create(
                 model=MODEL,
                 messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context, request.response_language),
-                max_tokens=1000,
-                temperature=0.3,
+                max_completion_tokens=2500,
+                reasoning_effort="low",
                 stream=True,
             )
             async for chunk in response:

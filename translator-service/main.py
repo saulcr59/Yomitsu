@@ -66,8 +66,8 @@ async def translate_context(request: TranslationRequest):
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": user_msg},
         ],
-        max_tokens=200,
-        temperature=0.3,
+        max_completion_tokens=1000,
+        reasoning_effort="none",
     )
     translation = (response.choices[0].message.content or "").strip()
     return {
@@ -95,8 +95,8 @@ async def stream_translate(request: TranslationRequest):
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user",   "content": user_msg},
                 ],
-                max_tokens=200,
-                temperature=0.3,
+                max_completion_tokens=1000,
+                reasoning_effort="none",
                 stream=True,
             )
             async for chunk in stream:

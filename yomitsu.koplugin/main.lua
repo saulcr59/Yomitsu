@@ -2263,6 +2263,23 @@ function Yomitsu:init()
 end
 
 
+-- KOReader only broadcasts PageUpdate on page flips, not when a book opens on
+-- its restored page — so warm that first page from ReaderReady. Delayed because
+-- Mokuro loads its OCR data ~1s after ReaderReady fires.
+function Yomitsu:onReaderReady()
+    UIManager:scheduleIn(3.0, function()
+        local ui = self.ui
+        if not ui or not ui.document then return end
+        local pageno = (ui.paging and ui.paging.current_page)
+            or (ui.view and ui.view.state and ui.view.state.page)
+        if pageno then
+            logger.info("[YOMITSU] ReaderReady: calentando página inicial p=" .. tostring(pageno))
+            self:onPageUpdate(pageno)
+        end
+    end)
+end
+
+
 -- Auto-warm the AI/dict cache when Mokuro turns a page, before the user taps.
 -- KOReader broadcasts "PageUpdate" through all registered modules, so this is
 -- called automatically on every page flip.
