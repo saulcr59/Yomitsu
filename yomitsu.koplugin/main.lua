@@ -24,6 +24,10 @@ local Yomitsu = WidgetContainer:extend{ name = "yomitsu", is_doc_only = true }
 -- ---------------------------------------------------------------------------
 local HISTORY_PATH = DataStorage:getSettingsDir() .. "/yomitsu_history.json"
 local HISTORY_MAX  = 20
+-- Re-lookups of the same word within this window (seconds) don't bump the
+-- counter: the count should mean "times I ran into this word and didn't know
+-- it", not raw taps — repeated testing of one word was inflating it.
+local HISTORY_COUNT_COOLDOWN = 3600
 
 local function load_history()
     local f = io.open(HISTORY_PATH, "r")
@@ -36,18 +40,28 @@ end
 
 local function save_to_history(word, reading)
     local hist = load_history()
-    local prev_count = 0
+    local prev_count, prev_ts = 0, nil
     for i = #hist, 1, -1 do
         if hist[i].word == word then
             prev_count = hist[i].count or 1
+            prev_ts    = hist[i].ts
             table.remove(hist, i)
         end
     end
-    local count = prev_count + 1
+    -- ts refreshes on every lookup, so a burst of taps on one word counts as
+    -- a single encounter no matter how long the burst lasts.
+    local now = os.time()
+    local count
+    if prev_count > 0 and prev_ts and (now - prev_ts) < HISTORY_COUNT_COOLDOWN then
+        count = prev_count
+    else
+        count = prev_count + 1
+    end
     table.insert(hist, 1, {
         word    = word,
         reading = reading or "",
         time    = os.date("%Y-%m-%d %H:%M"),
+        ts      = now,
         count   = count,
     })
     while #hist > HISTORY_MAX do table.remove(hist) end
