@@ -149,17 +149,18 @@ def _extract_sentence(context: str, target_word: str, original_word: str = "") -
 
 
 async def _chat_create(**kwargs):
-    """_oai_client.chat.completions.create with one retry on 401. OpenAI
+    """_oai_client.chat.completions.create with retries on 401. OpenAI
     intermittently returns 401 'insufficient permissions' under bursts even
-    with a full-permissions key; the SDK retries 429/5xx itself but never 401."""
-    try:
-        return await _oai_client.chat.completions.create(**kwargs)
-    except Exception as e:
-        if getattr(e, "status_code", None) != 401:
-            raise
-        logger.warning("[RETRY] 401 transitorio de OpenAI, reintentando en 1s...")
-        await asyncio.sleep(1.0)
-        return await _oai_client.chat.completions.create(**kwargs)
+    with a full-permissions key — sometimes twice in a row — the SDK retries
+    429/5xx itself but never 401."""
+    for delay in (1.0, 3.0, None):
+        try:
+            return await _oai_client.chat.completions.create(**kwargs)
+        except Exception as e:
+            if getattr(e, "status_code", None) != 401 or delay is None:
+                raise
+            logger.warning(f"[RETRY] 401 transitorio de OpenAI, reintento en {delay:.0f}s...")
+            await asyncio.sleep(delay)
 
 
 _GRAMMAR_ERROR_MARKER = "[Error al generar análisis]"  # emitted by grammar service on failure

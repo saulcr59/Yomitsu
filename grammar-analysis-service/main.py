@@ -24,17 +24,18 @@ client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 
 async def _chat_create(**kwargs):
-    """chat.completions.create with one retry on 401. OpenAI intermittently
+    """chat.completions.create with retries on 401. OpenAI intermittently
     returns 401 'insufficient permissions' under bursts even with a
-    full-permissions key; the SDK retries 429/5xx itself but never 401."""
-    try:
-        return await client.chat.completions.create(**kwargs)
-    except Exception as e:
-        if getattr(e, "status_code", None) != 401:
-            raise
-        logger.warning("[RETRY] 401 transitorio de OpenAI, reintentando en 1s...")
-        await asyncio.sleep(1.0)
-        return await client.chat.completions.create(**kwargs)
+    full-permissions key — sometimes twice in a row — the SDK retries
+    429/5xx itself but never 401."""
+    for delay in (1.0, 3.0, None):
+        try:
+            return await client.chat.completions.create(**kwargs)
+        except Exception as e:
+            if getattr(e, "status_code", None) != 401 or delay is None:
+                raise
+            logger.warning(f"[RETRY] 401 transitorio de OpenAI, reintento en {delay:.0f}s...")
+            await asyncio.sleep(delay)
 
 SYSTEM_PROMPT = """\
 You are an expert Japanese linguist. Analyze Japanese sentences with precision and didactic clarity: \
