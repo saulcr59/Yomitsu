@@ -2351,6 +2351,142 @@ end
 -- Auto-warm the AI/dict cache when Mokuro turns a page, before the user taps.
 -- KOReader broadcasts "PageUpdate" through all registered modules, so this is
 -- called automatically on every page flip.
+-- Render a not-displayed page to PNG and return it base64-encoded, or nil.
+-- Uses the document render cache, so if KOReader already pre-rendered the
+-- page (its own next-page hinting) this is nearly free.
+local function _render_page_png_b64(ui, pageno)
+    local doc = ui and ui.document
+    if not doc or type(doc.renderPage) ~= "function" then return nil end
+    local ok, b64 = pcall(function()
+        local dims = doc:getNativePageDimensions(pageno)
+        if not dims or not dims.w or dims.w <= 0 then return nil end
+        -- Same effective resolution as the Screen:shot path: screen width.
+        local zoom = math.min(1, Screen:getWidth() / dims.w)
+        local tile = doc:renderPage(pageno, nil, zoom, 0, 1, 0)
+        if not tile or not tile.bb then return nil end
+        local tmp = "/tmp/yomitsu_prefetch.png"
+        tile.bb:writePNG(tmp)
+        local f = io.open(tmp, "rb")
+        if not f then return nil end
+        local data = f:read("*a")
+        f:close()
+        os.remove(tmp)
+        if not data or #data == 0 then return nil end
+        return (require("mime").b64(data))
+    end)
+    if not ok then return nil end
+    return b64
+end
+
+local function _current_page(ui)
+    return (ui.paging and ui.paging.current_page)
+        or (ui.view and ui.view.state and ui.view.state.page)
+end
+
+-- Prefetch the page after cur_pageno: vision first (off-screen render), then
+-- warm-page — the same order as the on-page flow, so the per-sentence caches
+-- are never filled with raw-OCR-context results that would block the vision
+-- ones. Only called once the current page is settled and fully warm, so
+-- skimming through pages never triggers it.
+local function _prefetch_next_page(ui, cur_pageno)
+    local doc = ui and ui.document
+    if not doc or not doc.file then return end
+    local next_pageno = cur_pageno + 1
+    local ok_pc, page_count = pcall(function() return doc:getPageCount() end)
+    if ok_pc and type(page_count) == "number" and next_pageno > page_count then return end
+    local next_key = doc.file .. ":" .. tostring(next_pageno)
+    if _warmed_pages[next_key] or _page_vision_pending[next_key] then return end
+
+    local ocr = _page_ocr_cache[next_key]
+    if not ocr then
+        local ok_ocr, text = pcall(_mokuro_page_text, ui, next_pageno)
+        if ok_ocr and type(text) == "string" and text ~= "" then
+            _page_ocr_cache[next_key] = text
+            ocr = text
+        end
+    end
+    if not ocr or #ocr <= 1 then return end
+
+    local function warm_next()
+        async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
+            json.encode({
+                text              = ocr,
+                page_context      = _page_ctx_cache[next_key] or ocr,
+                response_language = _get_response_language(),
+            }), nil, 30,
+            function(code, body)
+                logger.info("[YOMITSU] prefetch warm p=" .. next_pageno .. ": " .. tostring(code))
+                _on_warm_page_response(code, body, next_key)
+                -- If the user reached this page while we were prefetching it,
+                -- keep the chain going with the page after it.
+                if code == 200 and _current_page(ui) == next_pageno then
+                    UIManager:scheduleIn(3.0, function()
+                        if _current_page(ui) == next_pageno then
+                            _prefetch_next_page(ui, next_pageno)
+                        end
+                    end)
+                end
+            end)
+    end
+
+    if _page_analyzed[next_key] then
+        warm_next()
+        return
+    end
+
+    local img_b64 = _render_page_png_b64(ui, next_pageno)
+    if not img_b64 then
+        -- No off-screen render on this build: skip silently. The page will be
+        -- handled by the normal on-page flow when the user reaches it.
+        logger.info("[YOMITSU] prefetch: render no disponible p=" .. next_pageno)
+        return
+    end
+    _page_vision_pending[next_key] = true
+    local title = doc.file:match("([^/]+)%.[^.]+$") or ""
+    local ok_pl, payload = pcall(json.encode, {
+        image_b64   = img_b64,
+        ocr_text    = ocr,
+        manga_title = title,
+        page_key    = next_key,
+    })
+    if not ok_pl or not payload then
+        _page_vision_pending[next_key] = nil
+        return
+    end
+    logger.info("[YOMITSU] prefetch vision → p=" .. next_pageno)
+    async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/analyze-page-context", payload, nil, 60,
+        function(code, body)
+            _page_vision_pending[next_key] = nil
+            if code == 200 and body then
+                local ok_d, data = pcall(json.decode, body)
+                if ok_d and type(data) == "table"
+                    and type(data.page_context) == "string" and #data.page_context > 0 then
+                    _page_ctx_cache[next_key] = data.page_context
+                    _page_analyzed[next_key]  = true
+                    logger.info("[YOMITSU] prefetch vision OK p=" .. next_pageno
+                        .. ": " .. #data.page_context .. "b")
+                    warm_next()
+                    return
+                end
+            end
+            -- Vision failed: unlike the on-page flow we do NOT warm with raw
+            -- OCR — leaving everything untouched lets the normal flow retry
+            -- with a real screenshot when the user reaches the page.
+            logger.warn("[YOMITSU] prefetch vision falló p=" .. next_pageno
+                .. " code=" .. tostring(code))
+        end)
+end
+
+-- Schedules the prefetch of pageno+1 if the user is still on pageno once the
+-- settle delay elapses (skimmed-past pages never fire).
+local function _schedule_prefetch(ui, pageno)
+    UIManager:scheduleIn(3.0, function()
+        if _current_page(ui) == pageno then
+            _prefetch_next_page(ui, pageno)
+        end
+    end)
+end
+
 function Yomitsu:onPageUpdate(pageno)
     if not _ACTIVE_HOST or _ACTIVE_HOST == "" then return end
     local ui = self.ui
@@ -2360,7 +2496,14 @@ function Yomitsu:onPageUpdate(pageno)
     -- Keep _last_page_key in sync so yomitsuInterceptor won't reset _warmed_pages
     -- on the first word tap and send a redundant warm request.
     _last_page_key = cur_page_key
-    if _warmed_pages[cur_page_key] then return end
+    if _warmed_pages[cur_page_key] then
+        -- Already warm (typically prefetched): just keep the chain going.
+        _schedule_prefetch(ui, pageno)
+        return
+    end
+    -- Landed on a page whose prefetch vision is in flight: wait for it instead
+    -- of duplicating the call; its completion will warm the page.
+    if _page_vision_pending[cur_page_key] then return end
 
     -- Try to read Mokuro OCR text for this page.
     -- Pass pageno explicitly so we don't depend on paging.current_page timing.
@@ -2391,6 +2534,9 @@ function Yomitsu:onPageUpdate(pageno)
             function(code, body)
                 logger.info("[YOMITSU] warm-page auto: " .. tostring(code) .. " p=" .. tostring(pageno))
                 _on_warm_page_response(code, body, cur_page_key)
+                if code == 200 then
+                    _schedule_prefetch(ui, pageno)
+                end
             end)
     end
 
