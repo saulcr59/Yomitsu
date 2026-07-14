@@ -24,9 +24,11 @@ local Yomitsu = WidgetContainer:extend{ name = "yomitsu", is_doc_only = true }
 -- ---------------------------------------------------------------------------
 local HISTORY_PATH = DataStorage:getSettingsDir() .. "/yomitsu_history.json"
 local HISTORY_MAX  = 20
--- Re-lookups of the same word within this window (seconds) don't bump the
--- counter: the count should mean "times I ran into this word and didn't know
--- it", not raw taps — repeated testing of one word was inflating it.
+-- The counter should mean "distinct times I ran into this word and didn't
+-- know it", not raw taps. A re-lookup does NOT bump it only when it is the
+-- same burst: same page AND less than this window (seconds) since the last
+-- tap. Meeting the word on another page counts even minutes later; meeting
+-- it again on the same page after this window (a re-read) also counts.
 local HISTORY_COUNT_COOLDOWN = 3600
 
 local function load_history()
@@ -38,30 +40,31 @@ local function load_history()
     return (ok and type(data) == "table") and data or {}
 end
 
-local function save_to_history(word, reading)
+local function save_to_history(word, reading, page_key)
     local hist = load_history()
-    local prev_count, prev_ts = 0, nil
+    local prev_count, prev_ts, prev_page = 0, nil, nil
     for i = #hist, 1, -1 do
         if hist[i].word == word then
             prev_count = hist[i].count or 1
             prev_ts    = hist[i].ts
+            prev_page  = hist[i].page
             table.remove(hist, i)
         end
     end
     -- ts refreshes on every lookup, so a burst of taps on one word counts as
-    -- a single encounter no matter how long the burst lasts.
+    -- a single encounter no matter how long the burst lasts. A lookup with no
+    -- page info (popup sub-lookup) is treated as part of the current burst.
     local now = os.time()
-    local count
-    if prev_count > 0 and prev_ts and (now - prev_ts) < HISTORY_COUNT_COOLDOWN then
-        count = prev_count
-    else
-        count = prev_count + 1
-    end
+    local same_page  = (page_key == nil) or (prev_page ~= nil and page_key == prev_page)
+    local same_burst = prev_count > 0 and prev_ts
+        and (now - prev_ts) < HISTORY_COUNT_COOLDOWN and same_page
+    local count = same_burst and prev_count or (prev_count + 1)
     table.insert(hist, 1, {
         word    = word,
         reading = reading or "",
         time    = os.date("%Y-%m-%d %H:%M"),
         ts      = now,
+        page    = page_key or prev_page,
         count   = count,
     })
     while #hist > HISTORY_MAX do table.remove(hist) end
@@ -1702,7 +1705,7 @@ local function yomitsuInterceptor(scope, text, ...)
             dojg      = dojg,
         }
 
-        local lookup_count = save_to_history(word, reading)
+        local lookup_count = save_to_history(word, reading, _page_key(scope))
 
         -- Build result list
         local results = {}
