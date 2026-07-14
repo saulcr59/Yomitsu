@@ -2,7 +2,9 @@ import json
 import asyncio
 import logging
 import glob
+import os
 import re
+import unicodedata
 from fastapi import FastAPI
 from pydantic import BaseModel
 from sudachipy import dictionary, tokenizer
@@ -288,10 +290,40 @@ def _load_mdx_with_redirects(mdx_path: str, target: dict, label: str) -> None:
         logger.error(f"Error cargando {label}: {e}")
 
 
+def _find_dict_file(preferred_path: str, dir_hint: str, filename: str) -> str:
+    """Return an existing path for a dictionary file. Tries the hardcoded path
+    first; if missing, walks ./dictionaries comparing NFC-normalized names —
+    Japanese folder names copied over SFTP from macOS/Windows often arrive
+    NFD-decomposed, so they look identical but no longer match byte-wise.
+    As a last resort, takes any .mdx inside a folder whose normalized name
+    contains dir_hint (covers a renamed .mdx inside the right folder)."""
+    if os.path.exists(preferred_path):
+        return preferred_path
+    root = "./dictionaries"
+    if not os.path.isdir(root):
+        return preferred_path
+    want_file = unicodedata.normalize("NFC", filename).lower()
+    want_dir  = unicodedata.normalize("NFC", dir_hint)
+    fallback = None
+    for dirpath, _dirs, files in os.walk(root):
+        dir_nfc = unicodedata.normalize("NFC", os.path.basename(dirpath))
+        for f in files:
+            if unicodedata.normalize("NFC", f).lower() == want_file:
+                logger.info(f"Ruta corregida para {filename}: {os.path.join(dirpath, f)!r}")
+                return os.path.join(dirpath, f)
+            if fallback is None and f.lower().endswith(".mdx") and want_dir in dir_nfc:
+                fallback = os.path.join(dirpath, f)
+    if fallback:
+        logger.info(f"Usando .mdx de la carpeta '{dir_hint}': {fallback!r}")
+        return fallback
+    return preferred_path
+
+
 def load_wisdom():
     logger.info("Cargando Wisdom MDX...")
     _load_mdx_with_redirects(
-        "./dictionaries/三省堂 ウィズダム和英辞典 第3版/SANWIZJ3.mdx",
+        _find_dict_file("./dictionaries/三省堂 ウィズダム和英辞典 第3版/SANWIZJ3.mdx",
+                        "ウィズダム", "SANWIZJ3.mdx"),
         WISDOM, "Wisdom",
     )
 
@@ -299,7 +331,8 @@ def load_wisdom():
 def load_genius():
     logger.info("Cargando Genius MDX...")
     _load_mdx_with_redirects(
-        "./dictionaries/大修館 ジーニアス和英辞典 第3版/GENIUSJ3.mdx",
+        _find_dict_file("./dictionaries/大修館 ジーニアス和英辞典 第3版/GENIUSJ3.mdx",
+                        "ジーニアス", "GENIUSJ3.mdx"),
         GENIUS, "Genius",
     )
 
