@@ -154,11 +154,14 @@ Translate EACH numbered line to Spanish independently, preserving the character'
 voice, speech register and personality (casual, rough, polite, childlike, archaic, etc.).
 Use the page context ONLY to resolve ambiguity: who is speaking, who is addressed,
 tone, and what pronouns or omitted subjects refer to.
-STRICT FIDELITY RULE: every content word (verb, noun, adjective) in your Spanish
-must correspond to a word actually present in that Japanese line. Never import
-verbs, actions or objects from other lines or from the page context. If a line
-expresses a state or emotion, translate the state itself — never the visible
-action that expresses it elsewhere on the page.
+STRICT FIDELITY RULE — applies to every line INDEPENDENTLY: every content word
+(verb, noun, adjective) in your Spanish for line N must correspond to a word
+actually present in Japanese line N. The transcript and the SCENE description
+are ONLY for disambiguation — NEVER copy verbs, actions, objects or imagery
+from them or from other lines into a translation. If a line expresses a state
+or emotion, translate that state or emotion itself, never a physical action
+visible elsewhere on the page. Before writing each translation, check every
+content word of your Spanish against that source line.
 Output format: one line per input line, same numbering, ONLY the translation:
 1. <Spanish translation of line 1>
 2. <Spanish translation of line 2>
@@ -184,14 +187,17 @@ async def translate_page(request: PageTranslationRequest):
     msg += f"Translate these lines to Spanish:\n{numbered}"
     logger.info(f"[TRANS-PAGE] {len(request.sentences)} líneas | ctx={_ctx_kind(request.page_context)}")
 
+    # "low" (not "none" like the tap path): this is a background call, and a bit
+    # of reasoning is what makes the model verify per-line fidelity instead of
+    # letting the SCENE description bleed into individual translations.
     response = await _chat_create(
         model=MODEL,
         messages=[
             {"role": "system", "content": PAGE_SYSTEM_PROMPT},
             {"role": "user",   "content": msg},
         ],
-        max_completion_tokens=4000,
-        reasoning_effort="none",
+        max_completion_tokens=6000,
+        reasoning_effort="low",
     )
     raw = (response.choices[0].message.content or "").strip()
     translations: dict[str, str] = {}

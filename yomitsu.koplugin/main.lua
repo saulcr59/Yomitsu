@@ -1396,8 +1396,14 @@ local function buildAiHtml(word, reading, ai, grammar, romaji_sentence, original
         body = body .. '<hr/>\n'
             .. '<p style="margin:0.3em 0 0.1em 0"><b><small>'
             .. _("Page context") .. ' (' .. kind .. ')</small></b></p>\n'
-            .. '<p style="margin:0.1em 0"><font color="#666"><small>'
-            .. _html_esc(pctx):gsub("\n", "<br/>") .. '</small></font></p>\n'
+        -- One <p> per line: KOReader's dict HTML renderer ignores <br/>.
+        for line in (pctx .. "\n"):gmatch("([^\n]*)\n") do
+            if line ~= "" then
+                body = body
+                    .. '<p style="margin:0.05em 0"><font color="#666"><small>'
+                    .. _html_esc(line) .. '</small></font></p>\n'
+            end
+        end
     end
 
     return _XHTML_HEAD .. body .. _XHTML_TAIL
