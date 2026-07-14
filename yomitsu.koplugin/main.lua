@@ -2491,8 +2491,10 @@ end
 
 -- Clears every Yomitsu cache: the plugin's session caches (dict phase-1, page
 -- OCR/context, warmed flags) and the orchestrator's persisted AI caches
--- (translations, grammar, vision pages) via POST /clear-cache.
-function Yomitsu:_clearCache()
+-- (translations, grammar, vision pages) via POST /clear-cache. After a
+-- successful server clear, re-runs the full page flow (vision + warm-page)
+-- on the current page so it is prewarmed again right away.
+function Yomitsu:_clearCache(tmi)
     local ConfirmBox = require("ui/widget/confirmbox")
     UIManager:show(ConfirmBox:new{
         text = _("Clear all cached data?\nAI results will be regenerated on demand (this costs API calls)."),
@@ -2502,6 +2504,9 @@ function Yomitsu:_clearCache()
             _page_ocr_cache, _page_ctx_cache = {}, {}
             _page_analyzed, _page_vision_pending = {}, {}
             _warmed_pages, _last_page_key = {}, nil
+            -- Close the menu now: the re-warm below screenshots the page for
+            -- vision and must not capture the menu overlay.
+            if tmi then pcall(function() tmi:closeMenu() end) end
             async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/clear-cache", "{}", nil, 10,
                 function(code, body)
                     local msg
@@ -2518,7 +2523,15 @@ function Yomitsu:_clearCache()
                     else
                         msg = _("Local cache cleared.\nServer did not respond — its cache was NOT cleared.")
                     end
-                    UIManager:show(InfoMessage:new{ text = msg, timeout = 5 })
+                    -- Re-warm the current page, scheduled after the info message
+                    -- disappears so the vision screenshot captures a clean page.
+                    local pageno = (self.ui and self.ui.paging and self.ui.paging.current_page)
+                        or (self.ui and self.ui.view and self.ui.view.state and self.ui.view.state.page)
+                    if code == 200 and pageno then
+                        msg = msg .. "\n" .. _("Prewarming current page...")
+                        UIManager:scheduleIn(3.5, function() self:onPageUpdate(pageno) end)
+                    end
+                    UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
                 end)
         end,
     })
@@ -2714,7 +2727,7 @@ function Yomitsu:addToMainMenu(menu_items)
             {
                 text = _("Clear cache"),
                 keep_menu_open = true,
-                callback = function() self:_clearCache() end,
+                callback = function(tmi) self:_clearCache(tmi) end,
             },
             {
                 text = _("Yomitsu AI"),
