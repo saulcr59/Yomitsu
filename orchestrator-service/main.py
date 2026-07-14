@@ -142,6 +142,24 @@ def _extract_sentence(context: str, target_word: str, original_word: str = "") -
     return context.strip()
 
 
+_GRAMMAR_ERROR_MARKER = "[Error al generar análisis]"  # emitted by grammar service on failure
+
+
+def _strip_meta(stream_text: str) -> str:
+    """Remove the leading \\x01{json}\\x01\\n metadata header from a stream body."""
+    return re.sub(r'^\x01[^\x01]*\x01\n?', '', stream_text)
+
+
+def _cacheable_translation(stream_text: str) -> bool:
+    """A translation stream is cacheable only if there is real content after the
+    meta header — a failed OpenAI call yields the header and nothing else."""
+    return bool(_strip_meta(stream_text).strip())
+
+
+def _cacheable_grammar(text: str) -> bool:
+    return bool(text.strip()) and _GRAMMAR_ERROR_MARKER not in text
+
+
 def _ctx_kind(page_context: str) -> str:
     """Classify the page_context used for an AI call: 'vision' when it is the
     vision model's output (always starts with a TRANSCRIPT: section), 'ocr'
@@ -358,9 +376,12 @@ async def analyze_translation_stream_ep(request: AnalyzeAiRequest):
         except Exception as e:
             logger.error(f"[TRANS-STREAM-PROXY] {e}")
         finally:
-            if chunks:
-                _trans_cache.set(sentence, "".join(chunks))
+            full = "".join(chunks)
+            if _cacheable_translation(full):
+                _trans_cache.set(sentence, full)
                 logger.info(f"[TRANS-CACHED] '{sentence[:50]}'")
+            elif chunks:
+                logger.warning(f"[TRANS-NOT-CACHED] respuesta vacía para '{sentence[:50]}'")
 
     return StreamingResponse(generate(), media_type="text/plain")
 
@@ -407,13 +428,16 @@ async def analyze_grammar_stream_ep(request: AnalyzeAiRequest):
         except Exception as e:
             logger.error(f"[GRAM-STREAM-PROXY] {e}")
         finally:
-            if chunks and meta_str:
+            text = "".join(chunks)
+            if meta_str and _cacheable_grammar(text):
                 _gram_cache.set(sentence, {
                     "meta":        meta_str,
-                    "text":        "".join(chunks),
+                    "text":        text,
                     "target_word": request.target_word,
                 })
                 logger.info(f"[GRAM-CACHED] '{request.target_word}' in '{sentence[:50]}'")
+            elif chunks:
+                logger.warning(f"[GRAM-NOT-CACHED] error/vacío para '{sentence[:50]}'")
 
     return StreamingResponse(generate(), media_type="text/plain")
 
@@ -455,13 +479,16 @@ async def _prewarm_sentence_grammar(sentence: str, target_word: str, part_of_spe
                 async for chunk in resp.aiter_text():
                     if chunk:
                         chunks.append(chunk)
-        if chunks:
+        text = "".join(chunks)
+        if _cacheable_grammar(text):
             _gram_cache.set(sentence, {
                 "meta":        meta_str,
-                "text":        "".join(chunks),
+                "text":        text,
                 "target_word": target_word,
             })
             logger.info(f"[GRAM-PREWARM] '{target_word}' | '{sentence[:40]}'")
+        elif chunks:
+            logger.warning(f"[GRAM-PREWARM-NOT-CACHED] error/vacío para '{sentence[:40]}'")
     except Exception as e:
         logger.error(f"[GRAM-PREWARM] '{sentence[:30]}': {e}")
 
@@ -486,9 +513,12 @@ async def _prewarm_sentence_translation(sentence: str, page_context: str = "") -
                 async for chunk in resp.aiter_text():
                     if chunk:
                         chunks.append(chunk)
-        if chunks:
-            _trans_cache.set(sentence, "".join(chunks))
+        full = "".join(chunks)
+        if _cacheable_translation(full):
+            _trans_cache.set(sentence, full)
             logger.info(f"[TRANS-PREWARM] '{sentence[:50]}'")
+        elif chunks:
+            logger.warning(f"[TRANS-PREWARM-NOT-CACHED] respuesta vacía para '{sentence[:50]}'")
     except Exception as e:
         logger.error(f"[TRANS-PREWARM] '{sentence[:30]}': {e}")
 
