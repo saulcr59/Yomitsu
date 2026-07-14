@@ -13,6 +13,7 @@ services:
       - "8001:8001"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TRANSLATOR_MODEL=${TRANSLATOR_MODEL:-gpt-5.6-terra}
     restart: unless-stopped
 
   grammar:
@@ -21,6 +22,7 @@ services:
       - "8003:8003"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GRAMMAR_MODEL=${GRAMMAR_MODEL:-gpt-5.6-terra}
     restart: unless-stopped
 
   orchestrator:
@@ -32,6 +34,8 @@ services:
       - TRANSLATOR_URL=http://translator:8001
       - GRAMMAR_URL=http://grammar:8003
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GRAMMAR_MODEL=${GRAMMAR_MODEL:-gpt-5.6-terra}
+      - VISION_MODEL=${VISION_MODEL:-gpt-5.6-terra}
     depends_on:
       - dictionary
       - translator
