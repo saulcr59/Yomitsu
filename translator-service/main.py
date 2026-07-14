@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("YOMITSU-TRANSLATOR")
 
-MODEL = os.environ.get("TRANSLATOR_MODEL", "gpt-5.6-luna")
+MODEL = os.environ.get("TRANSLATOR_MODEL", "gpt-5.6-terra")
 client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 app = FastAPI(title="Yomitsu Translator Service")
@@ -26,6 +26,14 @@ SYSTEM_PROMPT = """\
 You are an expert Japanese-to-Spanish translator specializing in manga and anime.
 Translate naturally and concisely, preserving the character's voice, speech register,
 and personality (casual, rough, polite, childlike, archaic, etc.).
+Use the page context ONLY to resolve ambiguity: who is speaking, who is addressed,
+tone, and what pronouns or omitted subjects refer to.
+STRICT FIDELITY RULE: every content word (verb, noun, adjective) in your Spanish
+must correspond to a word actually present in the Japanese line. Never import
+verbs, actions or objects from the page context. If the line expresses a state or
+emotion, translate the state itself — never the visible action that expresses it
+elsewhere on the page. The reader is a Japanese learner comparing your translation
+word-by-word against the original line.
 Return ONLY the Spanish translation — no explanations, no notes, no alternatives."""
 
 

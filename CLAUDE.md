@@ -78,7 +78,7 @@ pip install -r requirements.txt
 - `dictionary-service/dictionaries/jitendex-yomitan/term_bank_*.json` (Jitendex Yomitan format)
 - `dictionary-service/dictionaries/研究社和英大辞典/研究社新和英大辞典.mdx` (Kenkyusha MDX)
 
-**AI models:** All AI calls go to OpenAI. Tap-time translation/grammar/ask-AI use `gpt-5.6-luna` (env `TRANSLATOR_MODEL` / `GRAMMAR_MODEL`). Page vision analysis uses `gpt-5.6-terra` (env `VISION_MODEL` in orchestrator). Do NOT use the bare `gpt-5.6` alias — it routes to Sol (the expensive flagship).
+**AI models:** All AI calls go to OpenAI, all on `gpt-5.6-terra` (env `TRANSLATOR_MODEL` / `GRAMMAR_MODEL` / `VISION_MODEL`). Do NOT use the bare `gpt-5.6` alias — it routes to Sol (the expensive flagship). GPT-5.x API: use `max_completion_tokens` (never `max_tokens`), no `temperature`, and set `reasoning_effort` explicitly ("none" for translation, "low" elsewhere) or the default medium reasoning eats the token budget and returns empty responses.
 
 **Vision page context:** On each Mokuro page flip, the plugin screenshots the rendered page (`Screen:shot`), base64-encodes it, and POSTs it with the raw OCR to the orchestrator's `/analyze-page-context`. The vision model returns a corrected transcript (reading order, speakers) + scene description, which replaces the raw OCR as `page_context` for all lookups and prewarm calls on that page. Cached server-side in `sentence_cache.json` by `book:page` (`pagectx` key) so re-reads never pay vision twice. Warm-page **text** stays raw Mokuro OCR — server cache keys must match the sentences KOReader sends on tap.
 

@@ -2266,6 +2266,10 @@ end
 -- KOReader only broadcasts PageUpdate on page flips, not when a book opens on
 -- its restored page — so warm that first page from ReaderReady. Delayed because
 -- Mokuro loads its OCR data ~1s after ReaderReady fires.
+-- _warmed_pages is cleared: it survives the whole KOReader session, and the
+-- server may have restarted (4am shutdown) since the flags were set. Warm
+-- requests are cheap when the server cache is intact, and re-sending one is
+-- the only way to learn the new epoch.
 function Yomitsu:onReaderReady()
     UIManager:scheduleIn(3.0, function()
         local ui = self.ui
@@ -2274,6 +2278,27 @@ function Yomitsu:onReaderReady()
             or (ui.view and ui.view.state and ui.view.state.page)
         if pageno then
             logger.info("[YOMITSU] ReaderReady: calentando página inicial p=" .. tostring(pageno))
+            _warmed_pages = {}
+            self:onPageUpdate(pageno)
+        end
+    end)
+end
+
+
+-- Same blind spot after waking from suspension: if the server restarted while
+-- the Kindle slept and the user stays on the same page, no warm request would
+-- ever fire and the stale epoch would never be detected. Delayed longer so the
+-- Kindle has time to re-join WiFi.
+function Yomitsu:onResume()
+    UIManager:scheduleIn(8.0, function()
+        local ui = self.ui
+        if not ui or not ui.document or not ui.document.file then return end
+        local pageno = (ui.paging and ui.paging.current_page)
+            or (ui.view and ui.view.state and ui.view.state.page)
+        if pageno then
+            local key = ui.document.file .. ":" .. tostring(pageno)
+            _warmed_pages[key] = nil
+            logger.info("[YOMITSU] Resume: re-verificando página p=" .. tostring(pageno))
             self:onPageUpdate(pageno)
         end
     end)

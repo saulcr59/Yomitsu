@@ -24,7 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("YOMITSU-ORCHESTRATOR")
 
-GRAMMAR_MODEL = os.environ.get("GRAMMAR_MODEL", "gpt-5.6-luna")
+GRAMMAR_MODEL = os.environ.get("GRAMMAR_MODEL", "gpt-5.6-terra")
 VISION_MODEL  = os.environ.get("VISION_MODEL",  "gpt-5.6-terra")
 
 _http_client: httpx.AsyncClient = None  # type: ignore[assignment]
