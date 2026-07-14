@@ -230,3 +230,7 @@ yomitsu.koplugin/config.json
 # Yomitsu runtime data
 sentence_cache.json
 .DS_Store
+
+# Orchestrator persisted cache (mounted volume in Docker)
+orchestrator-service/data/
+orchestrator-service/sentence_cache.json

@@ -71,8 +71,13 @@ _PREWARM_SEM = asyncio.Semaphore(4)
 # Sentence-level LRU cache
 # ---------------------------------------------------------------------------
 
-_CACHE_MAX  = 100
-_CACHE_FILE = os.path.join(os.path.dirname(__file__), "sentence_cache.json")
+# ~2000 sentences ≈ 125 dense manga pages per cache. Grammar entries are the
+# biggest (~4KB each) → worst case ~10MB of RAM. Page contexts are unbounded.
+_CACHE_MAX  = 2000
+# Overridable so Docker can point it at a mounted volume that survives rebuilds.
+_CACHE_FILE = os.environ.get(
+    "CACHE_FILE",
+    os.path.join(os.path.dirname(__file__), "sentence_cache.json"))
 
 
 class _LRUCache:
@@ -122,6 +127,9 @@ def _load_caches() -> None:
 
 def _save_caches() -> None:
     try:
+        cache_dir = os.path.dirname(_CACHE_FILE)
+        if cache_dir:
+            os.makedirs(cache_dir, exist_ok=True)
         data = {
             "trans":   dict(_trans_cache._data),
             "gram":    dict(_gram_cache._data),
