@@ -142,6 +142,20 @@ def _extract_sentence(context: str, target_word: str, original_word: str = "") -
     return context.strip()
 
 
+async def _chat_create(**kwargs):
+    """_oai_client.chat.completions.create with one retry on 401. OpenAI
+    intermittently returns 401 'insufficient permissions' under bursts even
+    with a full-permissions key; the SDK retries 429/5xx itself but never 401."""
+    try:
+        return await _oai_client.chat.completions.create(**kwargs)
+    except Exception as e:
+        if getattr(e, "status_code", None) != 401:
+            raise
+        logger.warning("[RETRY] 401 transitorio de OpenAI, reintentando en 1s...")
+        await asyncio.sleep(1.0)
+        return await _oai_client.chat.completions.create(**kwargs)
+
+
 _GRAMMAR_ERROR_MARKER = "[Error al generar análisis]"  # emitted by grammar service on failure
 
 
@@ -328,7 +342,7 @@ async def analyze_page_context(request: PageContextRequest):
     content.append({"type": "text", "text": prompt})
 
     try:
-        response = await _oai_client.chat.completions.create(
+        response = await _chat_create(
             model=VISION_MODEL,
             messages=[{"role": "user", "content": content}],
             max_completion_tokens=2000,
@@ -614,7 +628,7 @@ async def ask_stream_ep(request: AskRequest):
 
     async def gen():
         try:
-            stream = await _oai_client.chat.completions.create(
+            stream = await _chat_create(
                 model=GRAMMAR_MODEL,
                 messages=messages,
                 max_completion_tokens=1500,

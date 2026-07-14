@@ -1,3 +1,4 @@
+import asyncio
 import re
 import os
 import logging
@@ -20,6 +21,20 @@ app = FastAPI(title="Yomitsu Grammar Analysis Service")
 
 MODEL = os.environ.get("GRAMMAR_MODEL", "gpt-5.6-terra")
 client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+
+async def _chat_create(**kwargs):
+    """chat.completions.create with one retry on 401. OpenAI intermittently
+    returns 401 'insufficient permissions' under bursts even with a
+    full-permissions key; the SDK retries 429/5xx itself but never 401."""
+    try:
+        return await client.chat.completions.create(**kwargs)
+    except Exception as e:
+        if getattr(e, "status_code", None) != 401:
+            raise
+        logger.warning("[RETRY] 401 transitorio de OpenAI, reintentando en 1s...")
+        await asyncio.sleep(1.0)
+        return await client.chat.completions.create(**kwargs)
 
 SYSTEM_PROMPT = """\
 You are an expert Japanese linguist. Analyze Japanese sentences with precision and didactic clarity: \
@@ -127,7 +142,7 @@ async def analyze_grammar(request: GrammarRequest):
     logger.info(f"[GRAMMAR] '{request.target_word}' en '{sentence}'")
 
     try:
-        response = await client.chat.completions.create(
+        response = await _chat_create(
             model=MODEL,
             messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context, request.response_language),
             max_completion_tokens=2500,
@@ -162,7 +177,7 @@ async def stream_grammar(request: GrammarRequest):
 
     async def generate():
         try:
-            response = await client.chat.completions.create(
+            response = await _chat_create(
                 model=MODEL,
                 messages=_build_messages(sentence, request.target_word, request.part_of_speech, request.page_context, request.response_language),
                 max_completion_tokens=2500,

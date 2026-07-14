@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import json
@@ -19,6 +20,20 @@ logger = logging.getLogger("YOMITSU-TRANSLATOR")
 
 MODEL = os.environ.get("TRANSLATOR_MODEL", "gpt-5.6-terra")
 client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+
+async def _chat_create(**kwargs):
+    """chat.completions.create with one retry on 401. OpenAI intermittently
+    returns 401 'insufficient permissions' under bursts even with a
+    full-permissions key; the SDK retries 429/5xx itself but never 401."""
+    try:
+        return await client.chat.completions.create(**kwargs)
+    except Exception as e:
+        if getattr(e, "status_code", None) != 401:
+            raise
+        logger.warning("[RETRY] 401 transitorio de OpenAI, reintentando en 1s...")
+        await asyncio.sleep(1.0)
+        return await client.chat.completions.create(**kwargs)
 
 app = FastAPI(title="Yomitsu Translator Service")
 
@@ -78,7 +93,7 @@ async def translate_context(request: TranslationRequest):
     sentence = _extract_sentence(request.context_phrase, request.target_word, request.original_word)
     user_msg = _build_user_msg(sentence, request.page_context)
     logger.info(f"[TRANSLATE] '{request.target_word}' | ctx={bool(request.page_context)}")
-    response = await client.chat.completions.create(
+    response = await _chat_create(
         model=MODEL,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -109,7 +124,7 @@ async def stream_translate(request: TranslationRequest):
     async def generate():
         yield f"\x01{meta}\x01\n"
         try:
-            stream = await client.chat.completions.create(
+            stream = await _chat_create(
                 model=MODEL,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
