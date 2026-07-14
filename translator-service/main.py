@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("YOMITSU-TRANSLATOR")
 
-MODEL = "gpt-4.1-mini"
+MODEL = os.environ.get("TRANSLATOR_MODEL", "gpt-5.6-luna")
 client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 app = FastAPI(title="Yomitsu Translator Service")

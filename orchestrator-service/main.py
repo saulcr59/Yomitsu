@@ -24,7 +24,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("YOMITSU-ORCHESTRATOR")
 
-GRAMMAR_MODEL = "gpt-4.1-mini"
+GRAMMAR_MODEL = os.environ.get("GRAMMAR_MODEL", "gpt-5.6-luna")
+VISION_MODEL  = os.environ.get("VISION_MODEL",  "gpt-5.6-terra")
 
 _http_client: httpx.AsyncClient = None  # type: ignore[assignment]
 _oai_client: AsyncOpenAI | None = None
@@ -88,6 +89,10 @@ class _LRUCache:
 _trans_cache = _LRUCache()
 _gram_cache  = _LRUCache()
 
+# Vision page analysis keyed by "book:page" — small text blobs, kept unbounded
+# so re-reading a volume never pays the vision call twice.
+_pagectx_cache: dict[str, str] = {}
+
 
 def _load_caches() -> None:
     if not os.path.exists(_CACHE_FILE):
@@ -99,8 +104,10 @@ def _load_caches() -> None:
             _trans_cache.set(k, v)
         for k, v in data.get("gram", {}).items():
             _gram_cache.set(k, v)
+        _pagectx_cache.update(data.get("pagectx", {}))
         logger.info(f"[CACHE] Restaurado: {len(_trans_cache._data)} traducciones + "
-                    f"{len(_gram_cache._data)} gramáticas desde disco")
+                    f"{len(_gram_cache._data)} gramáticas + "
+                    f"{len(_pagectx_cache)} páginas desde disco")
     except Exception as e:
         logger.warning(f"[CACHE] No se pudo cargar el cache: {e}")
 
@@ -108,13 +115,15 @@ def _load_caches() -> None:
 def _save_caches() -> None:
     try:
         data = {
-            "trans": dict(_trans_cache._data),
-            "gram":  dict(_gram_cache._data),
+            "trans":   dict(_trans_cache._data),
+            "gram":    dict(_gram_cache._data),
+            "pagectx": _pagectx_cache,
         }
         with open(_CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         logger.info(f"[CACHE] Guardado: {len(_trans_cache._data)} traducciones + "
-                    f"{len(_gram_cache._data)} gramáticas en disco")
+                    f"{len(_gram_cache._data)} gramáticas + "
+                    f"{len(_pagectx_cache)} páginas en disco")
     except Exception as e:
         logger.warning(f"[CACHE] No se pudo guardar el cache: {e}")
 
@@ -173,10 +182,12 @@ class PageContextRequest(BaseModel):
     image_b64: str | None = None
     ocr_text: str = ""
     manga_title: str = ""
+    page_key: str = ""  # "book:page" — enables server-side caching per page
 
 
 class WarmPageRequest(BaseModel):
     text: str
+    page_context: str = ""  # vision page analysis; passed to prewarm calls
     response_language: str = "English"
 
 
@@ -225,8 +236,14 @@ async def health():
 
 @app.post("/analyze-page-context")
 async def analyze_page_context(request: PageContextRequest):
-    """Describes a manga page using GPT-4.1-mini vision. Called once per page by Lua,
-    result is cached client-side and reused for all word lookups on that page."""
+    """Analyzes a manga page with vision: corrected transcript of every bubble in
+    reading order + speakers + scene description. Called once per page by Lua;
+    the result becomes the page_context for every lookup on that page.
+    Cached server-side by page_key so re-reading never pays vision twice."""
+    if request.page_key and request.page_key in _pagectx_cache:
+        logger.info(f"[PAGE-CTX-HIT] {request.page_key}")
+        return {"page_context": _pagectx_cache[request.page_key], "cached": True}
+
     if not _oai_client:
         raise HTTPException(status_code=503, detail="OpenAI not configured")
 
@@ -235,8 +252,8 @@ async def analyze_page_context(request: PageContextRequest):
         content.append({
             "type": "image_url",
             "image_url": {
-                "url": f"data:image/jpeg;base64,{request.image_b64}",
-                "detail": "low",
+                "url": f"data:image/png;base64,{request.image_b64}",
+                "detail": "high",
             }
         })
 
@@ -244,24 +261,34 @@ async def analyze_page_context(request: PageContextRequest):
     if request.manga_title:
         prompt += f"Manga: {request.manga_title}\n"
     if request.ocr_text:
-        prompt += f"Text on this page: {request.ocr_text}\n"
+        prompt += f"OCR text extracted from this page (may contain errors):\n{request.ocr_text}\n\n"
     prompt += (
-        "Briefly describe the scene in English (under 80 words): "
-        "who is present, who is speaking to whom, their relationship, "
-        "the emotional tone, and any relevant action or setting."
+        "Look at this manga page and output exactly two sections:\n\n"
+        "TRANSCRIPT:\n"
+        "Every speech bubble and text box in Japanese reading order (right to left, "
+        "top to bottom), one per line. Use the image to fix any OCR errors "
+        "(wrong kanji, merged furigana, bad line order). If the speaker is "
+        "identifiable, prefix the line with their name or role in brackets, "
+        "e.g. [店員] or [girl].\n\n"
+        "SCENE:\n"
+        "One or two sentences in English: who is present, who is speaking to whom, "
+        "their relationship, the emotional tone, and any relevant action or setting.\n\n"
+        "Output only these two sections, nothing else."
     )
     content.append({"type": "text", "text": prompt})
 
     try:
         response = await _oai_client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model=VISION_MODEL,
             messages=[{"role": "user", "content": content}],
-            max_tokens=120,
+            max_tokens=700,
             temperature=0.2,
         )
-        description = (response.choices[0].message.content or "").strip()
-        logger.info(f"[PAGE-CTX] {request.manga_title}: {description[:70]}")
-        return {"page_context": description}
+        analysis = (response.choices[0].message.content or "").strip()
+        if request.page_key and analysis:
+            _pagectx_cache[request.page_key] = analysis
+        logger.info(f"[PAGE-CTX] {request.page_key or request.manga_title}: {len(analysis)} chars")
+        return {"page_context": analysis}
     except Exception as e:
         logger.error(f"[PAGE-CTX-ERROR] {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -372,7 +399,7 @@ def _split_page_sentences(text: str) -> list[str]:
     return result
 
 
-async def _prewarm_sentence_grammar(sentence: str, target_word: str, part_of_speech: str, response_language: str = "English") -> None:
+async def _prewarm_sentence_grammar(sentence: str, target_word: str, part_of_speech: str, response_language: str = "English", page_context: str = "") -> None:
     """Analyze grammar for one sentence and store in _gram_cache (romaji included)."""
     if _gram_cache.get(sentence) is not None:
         return
@@ -381,7 +408,7 @@ async def _prewarm_sentence_grammar(sentence: str, target_word: str, part_of_spe
         "target_word":       target_word,
         "original_word":     "",
         "part_of_speech":    part_of_speech,
-        "page_context":      "",
+        "page_context":      page_context,
         "response_language": response_language,
     }
     _, romaji_sentence = await _tokenize(sentence, target_word)
@@ -404,7 +431,7 @@ async def _prewarm_sentence_grammar(sentence: str, target_word: str, part_of_spe
         logger.error(f"[GRAM-PREWARM] '{sentence[:30]}': {e}")
 
 
-async def _prewarm_sentence_translation(sentence: str) -> None:
+async def _prewarm_sentence_translation(sentence: str, page_context: str = "") -> None:
     """Translate one sentence and store the result in _trans_cache.
     Called as a background task; errors are silently logged."""
     if _trans_cache.get(sentence) is not None:
@@ -414,7 +441,7 @@ async def _prewarm_sentence_translation(sentence: str) -> None:
         "target_word":    "",
         "original_word":  "",
         "part_of_speech": "",
-        "page_context":   "",
+        "page_context":   page_context,
     }
     chunks: list[str] = []
     try:
@@ -453,11 +480,12 @@ async def warm_page_ep(request: WarmPageRequest):
     for item in dict_result.get("sentence_targets", []):
         sentence = item["sentence"]
         if _trans_cache.get(sentence) is None:
-            asyncio.create_task(_prewarm_sentence_translation(sentence))
+            asyncio.create_task(_prewarm_sentence_translation(sentence, request.page_context))
             queued_trans += 1
         if _gram_cache.get(sentence) is None:
             asyncio.create_task(_prewarm_sentence_grammar(
-                sentence, item["target_word"], item["part_of_speech"], request.response_language))
+                sentence, item["target_word"], item["part_of_speech"],
+                request.response_language, request.page_context))
             queued_gram += 1
 
     logger.info(f"[WARM-PAGE] dict={dict_warmed} trans={queued_trans} gram={queued_gram}")

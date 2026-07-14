@@ -64,9 +64,15 @@ local _cache      = {}
 local _cache_keys = {}
 local CACHE_MAX   = 50
 
--- Page context cache keyed by "cbz_path:page_no" → GPT scene description.
--- Populated in background after first word per page; used for all subsequent lookups.
+-- Page caches keyed by "cbz_path:page_no".
+-- _page_ocr_cache: raw Mokuro OCR text — always used as warm-page text so the
+--   server cache keys match the sentences KOReader sends on tap.
+-- _page_ctx_cache: context sent to the AI services — starts as raw OCR and is
+--   replaced by the vision analysis (corrected transcript + speakers + scene).
+local _page_ocr_cache     = {}
 local _page_ctx_cache     = {}
+local _page_analyzed      = {}  -- pages whose vision analysis succeeded
+local _page_vision_pending = {} -- vision in flight; tap's fallback warm must wait
 local _warmed_pages       = {}  -- pages already confirmed warm by server
 local _last_page_key      = nil -- resets _warmed_pages on page change
 local _server_epoch       = nil -- server startup epoch; reset _warmed_pages on change
@@ -89,6 +95,24 @@ local function _on_warm_page_response(code, body, page_key)
     if page_key then
         _warmed_pages[page_key] = true
     end
+end
+
+-- Screenshot the currently displayed page and return it base64-encoded (PNG),
+-- or nil if capture fails on this device/KOReader build.
+local function _capture_screen_b64()
+    local tmp = "/tmp/yomitsu_page.png"
+    local ok_shot = pcall(function() Screen:shot(tmp) end)
+    if not ok_shot then return nil end
+    local f = io.open(tmp, "rb")
+    if not f then return nil end
+    local data = f:read("*a")
+    f:close()
+    os.remove(tmp)
+    if not data or #data == 0 then return nil end
+    -- luasocket's mime.b64 pads correctly when called with a single argument
+    local ok_b64, b64 = pcall(function() return (require("mime").b64(data)) end)
+    if not ok_b64 or not b64 or #b64 == 0 then return nil end
+    return b64
 end
 
 -- Map KOReader locale (e.g. "es_ES") to a full language name for AI response prompts.
@@ -1736,10 +1760,13 @@ local function yomitsuInterceptor(scope, text, ...)
 
         -- Cache raw OCR text per page (synchronous — available on first word too).
         local cur_page_key = _page_key(scope)
-        if cur_page_key and not _page_ctx_cache[cur_page_key] then
+        if cur_page_key and not _page_ocr_cache[cur_page_key] then
             local ok_ocr, ocr_text = pcall(_mokuro_page_text, scope)
             if ok_ocr and type(ocr_text) == "string" and ocr_text ~= "" then
-                _page_ctx_cache[cur_page_key] = ocr_text
+                _page_ocr_cache[cur_page_key] = ocr_text
+                if not _page_ctx_cache[cur_page_key] then
+                    _page_ctx_cache[cur_page_key] = ocr_text
+                end
                 logger.info("[YOMITSU] OCR cacheado: " .. #ocr_text .. "b key=" .. cur_page_key)
             else
                 logger.warn("[YOMITSU] OCR vacío: ok=" .. tostring(ok_ocr)
@@ -1756,14 +1783,23 @@ local function yomitsuInterceptor(scope, text, ...)
         end
 
         -- On first lookup per page, warm the dict/AI caches for all words/sentences.
-        -- Use Mokuro OCR text if available, otherwise the sentence context.
-        if cur_page_key and not _warmed_pages[cur_page_key] then
-            local warm_text = (page_ctx ~= "" and page_ctx) or context
+        -- Warm text must be the raw OCR (cache keys match tap sentences); the
+        -- vision analysis, if available, rides along as page_context.
+        -- Skipped while a vision analysis is in flight: warming now would fill the
+        -- server cache with raw-OCR-context results and block the better ones.
+        if cur_page_key and not _warmed_pages[cur_page_key]
+            and not _page_vision_pending[cur_page_key] then
+            local ocr = (cur_page_key and _page_ocr_cache[cur_page_key]) or ""
+            local warm_text = (ocr ~= "" and ocr) or context
             logger.info("[YOMITSU] warm-page trigger: key=" .. tostring(cur_page_key)
-                .. " page_ctx=" .. #page_ctx .. "b context=" .. #context .. "b")
+                .. " ocr=" .. #ocr .. "b page_ctx=" .. #page_ctx .. "b context=" .. #context .. "b")
             if warm_text and #warm_text > 1 then
                 async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
-                    json.encode({ text = warm_text, response_language = _get_response_language() }), nil, 30,
+                    json.encode({
+                        text              = warm_text,
+                        page_context      = page_ctx,
+                        response_language = _get_response_language(),
+                    }), nil, 30,
                     function(code, body)
                         logger.info("[YOMITSU] warm-page response: code=" .. tostring(code)
                             .. " body=" .. tostring(body and body:sub(1, 120)))
@@ -2243,10 +2279,13 @@ function Yomitsu:onPageUpdate(pageno)
 
     -- Try to read Mokuro OCR text for this page.
     -- Pass pageno explicitly so we don't depend on paging.current_page timing.
-    if not _page_ctx_cache[cur_page_key] then
+    if not _page_ocr_cache[cur_page_key] then
         local ok, text = pcall(_mokuro_page_text, ui, pageno)
         if ok and type(text) == "string" and text ~= "" then
-            _page_ctx_cache[cur_page_key] = text
+            _page_ocr_cache[cur_page_key] = text
+            if not _page_ctx_cache[cur_page_key] then
+                _page_ctx_cache[cur_page_key] = text
+            end
             logger.info("[YOMITSU] OCR auto-cacheado: " .. #text .. "b p=" .. tostring(pageno))
         else
             logger.warn("[YOMITSU] onPageUpdate: sin OCR p=" .. tostring(pageno)
@@ -2254,15 +2293,74 @@ function Yomitsu:onPageUpdate(pageno)
         end
     end
 
-    local warm_text = _page_ctx_cache[cur_page_key]
-    if not warm_text or #warm_text <= 1 then return end
+    local ocr_text = _page_ocr_cache[cur_page_key]
+    if not ocr_text or #ocr_text <= 1 then return end
 
-    async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
-        json.encode({ text = warm_text, response_language = _get_response_language() }), nil, 30,
-        function(code, body)
-            logger.info("[YOMITSU] warm-page auto OK: " .. tostring(code) .. " p=" .. tostring(pageno))
-            _on_warm_page_response(code, body, cur_page_key)
-        end)
+    local function send_warm()
+        async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/warm-page",
+            json.encode({
+                text              = ocr_text,
+                page_context      = _page_ctx_cache[cur_page_key] or "",
+                response_language = _get_response_language(),
+            }), nil, 30,
+            function(code, body)
+                logger.info("[YOMITSU] warm-page auto: " .. tostring(code) .. " p=" .. tostring(pageno))
+                _on_warm_page_response(code, body, cur_page_key)
+            end)
+    end
+
+    if _page_analyzed[cur_page_key] then
+        send_warm()
+        return
+    end
+
+    -- Vision pass: screenshot the page once it has actually been drawn, send it
+    -- with the OCR to /analyze-page-context, and use the corrected transcript +
+    -- scene as page_context for warm-page and all taps. Falls back to raw OCR.
+    _page_vision_pending[cur_page_key] = true
+    UIManager:scheduleIn(1.0, function()
+        local function give_up_and_warm()
+            _page_vision_pending[cur_page_key] = nil
+            send_warm()
+        end
+        local now_page = (ui.paging and ui.paging.current_page)
+            or (ui.view and ui.view.state and ui.view.state.page)
+        if now_page and now_page ~= pageno then
+            _page_vision_pending[cur_page_key] = nil  -- user already moved on
+            return
+        end
+        local img_b64 = _capture_screen_b64()
+        if not img_b64 then
+            logger.warn("[YOMITSU] page-context: captura no disponible p=" .. tostring(pageno))
+            give_up_and_warm()
+            return
+        end
+        local title = ui.document.file:match("([^/]+)%.[^.]+$") or ""
+        local ok_pl, payload = pcall(json.encode, {
+            image_b64   = img_b64,
+            ocr_text    = ocr_text,
+            manga_title = title,
+            page_key    = cur_page_key,
+        })
+        if not ok_pl or not payload then give_up_and_warm(); return end
+        async_post_to(_ACTIVE_HOST, _ACTIVE_PORT, "/analyze-page-context", payload, nil, 60,
+            function(code, body)
+                if code == 200 and body then
+                    local ok_d, data = pcall(json.decode, body)
+                    if ok_d and type(data) == "table"
+                        and type(data.page_context) == "string" and #data.page_context > 0 then
+                        _page_ctx_cache[cur_page_key] = data.page_context
+                        _page_analyzed[cur_page_key]  = true
+                        logger.info("[YOMITSU] page-context OK: " .. #data.page_context
+                            .. "b p=" .. tostring(pageno))
+                    end
+                else
+                    logger.warn("[YOMITSU] page-context falló: code=" .. tostring(code)
+                        .. " p=" .. tostring(pageno))
+                end
+                give_up_and_warm()
+            end)
+    end)
 end
 
 

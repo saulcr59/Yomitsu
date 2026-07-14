@@ -226,3 +226,7 @@ translator-service/models/*
 !translator-service/models/.gitkeep
 # Yomitsu plugin local config (contains private server IPs)
 yomitsu.koplugin/config.json
+
+# Yomitsu runtime data
+sentence_cache.json
+.DS_Store

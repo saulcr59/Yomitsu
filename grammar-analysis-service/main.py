@@ -18,7 +18,7 @@ logger = logging.getLogger("YOMITSU-GRAMMAR")
 
 app = FastAPI(title="Yomitsu Grammar Analysis Service")
 
-MODEL = "gpt-4.1-mini"
+MODEL = os.environ.get("GRAMMAR_MODEL", "gpt-5.6-luna")
 client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 SYSTEM_PROMPT = """\
