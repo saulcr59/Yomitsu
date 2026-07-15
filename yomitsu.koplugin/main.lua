@@ -421,6 +421,9 @@ local function _ref_verbs()
     h = h .. '<p style="margin-left:0.5em"><b>〜と</b> — ' .. L("natural consequence: 'Whenever X, Y always follows' (not for intentions)") .. '</p>'
     h = h .. '<p style="margin-left:1.2em;color:#555">' .. L("dictionary form") .. ' + と:  '
         .. '春になると桜が咲く ' .. r('(haru ni naru to sakura ga saku)') .. '</p>'
+    h = h .. '<p style="margin-left:0.5em"><b>〜なら</b> — ' .. L("contextual: 'if that's the case / if it's X you mean' — reacts to what was just said") .. '</p>'
+    h = h .. '<p style="margin-left:1.2em;color:#555">' .. L("plain form") .. ' + なら:  '
+        .. '東京に行くなら新幹線がいい ' .. r('(Tōkyō ni iku nara shinkansen ga ii)') .. '</p>'
 
     _ref_verbs_cache = h .. _XHTML_TAIL
     return _ref_verbs_cache
@@ -449,14 +452,14 @@ local function _ref_adj()
     h = h .. '<hr/>'
 
     h = h .. '<h3>い-' .. L("adjectives") .. ' (高い ' .. r('takai') .. ')</h3>'
-    row(L("Plain"),           '—',               '高い ' .. r('takai'),         '高い山だ — "it is an expensive mountain"')
+    row(L("Plain"),           '—',               '高い ' .. r('takai'),         '高い山だ — "it is a tall mountain" (高い = tall/high; expensive)')
     row(L("Negative"),        'い → くない',       '高くない ' .. r('takakunai'), L("not expensive"))
     row(L("Past"),            'い → かった',       '高かった ' .. r('takakatta'), L("was expensive"))
     row(L("Past negative"),   'い → くなかった',   '高くなかった ' .. r('takakunakatta'), L("was not expensive"))
     row(L("Adverb"),          'い → く',          '高く ' .. r('takaku'),        '高く飛ぶ — "fly high"')
     row(L("Te-form"),         'い → くて',         '高くて ' .. r('takakute'),   '高くて買えない — "too expensive to buy"')
     row(L("Conditional -ば"), 'い → ければ',       '高ければ ' .. r('takakereba'), nil)
-    row(L("Noun form"),       'い → さ',          '高さ ' .. r('takasa'),        L("height / expensiveness"))
+    row(L("Noun form"),       'い → さ',          '高さ ' .. r('takasa'),        L("height"))
     row(L("Polite"),          'い → いです',       '高いです ' .. r('takai desu'), L("formal register"))
     h = h .. '<p style="margin-left:0.5em;color:#666"><i>⚠ いい/よい ' .. r('(ii/yoi)') .. ' (' .. L("good") .. ') '
         .. L("is irregular") .. ': ' .. L("neg") .. '→よくない ' .. r('(yokunai)') .. ' · ' .. L("past") .. '→よかった ' .. r('(yokatta)') .. ' · '
@@ -472,7 +475,7 @@ local function _ref_adj()
     row(L("Adverb"),                    '+ に',              '静かに ' .. r('shizuka ni'),         '静かに話す — "speak quietly"')
     row(L("Te-form"),                   '+ で',              '静かで ' .. r('shizuka de'),         '静かで快適だ — "quiet and comfortable"')
     row(L("Conditional"),               '+ なら(ば)',        '静かなら ' .. r('shizuka nara'),     L("if it is quiet"))
-    row(L("Noun form"),                 '+ さ',              '静かさ ' .. r('shizukasa'),          L("quietness"))
+    row(L("Noun form"),                 '+ さ',              '静けさ ' .. r('shizukesa'),          L("quietness") .. ' ⚠ ' .. L("irregular: 静けさ, not 静かさ"))
     row(L("Polite"),                    '+ です',            '静かです ' .. r('shizuka desu'),     L("formal register"))
     h = h .. '<hr/>'
 
@@ -528,6 +531,7 @@ local function _ref_particles()
     particle('へ', '(e)',  L("Direction — softer/more literary than に"),                                  '東京へ行く', '(Tōkyō e iku)')
     particle('の', '(no)', L("Possession; noun modifier ('of'); nominalizer"),                             '私の本・行くのが好き', '(watashi no hon / iku no ga suki)')
     particle('と', '(to)', L("And (exhaustive); accompaniment (with); quotation"),                        '猫と犬・「行く」と言った', '(neko to inu / "iku" to itta)')
+    particle('や', '(ya)', L("And (non-exhaustive: 'things like A and B'); often with など"),             '猫や犬（など）', '(neko ya inu (nado))')
     particle('か', '(ka)', L("Question marker; or (between options)"),                                    '行くか？・AかB', '(iku ka?)')
     particle('も', '(mo)', L("Also / too / even; replaces は/が/を"),                                     '私も行く・何もない', '(watashi mo iku / nani mo nai)')
     particle('だけ', '(dake)', L("Only, just, nothing more than"),                                         '一つだけ・これだけ', '(hitotsu dake / kore dake)')
@@ -537,6 +541,17 @@ local function _ref_particles()
     particle('より', '(yori)', L("Than (comparison); from (formal/literary)"),                             'AよりBが好き', '(A yori B ga suki)')
     particle('ので', '(node)', L("Because/since — soft, objective. More polite than から"),               '雨なので行かない', '(ame na node ikanai)')
     particle('のに', '(noni)', L("Even though / despite — surprise or disappointment"),                   '頑張ったのに負けた', '(ganbatta noni maketa)')
+    h = h .. '<hr/>'
+
+    h = h .. '<h3>' .. L("Sentence-final particles") .. ' ' .. r('(shūjoshi)') .. '</h3>'
+    particle('ね', '(ne)',   L("Seeks agreement / softens: 'right?, isn't it?'"),                         'いい天気だね', '(ii tenki da ne)')
+    particle('よ', '(yo)',   L("Assertion — tells the listener something they don't know"),               '危ないよ！', '(abunai yo!)')
+    particle('な', '(na)',   L("Casual ね (often masc.); after dictionary form = prohibition"),           'うまいな・行くな！', '(umai na / iku na!)')
+    particle('ぞ', '(zo)',   L("Rough masculine emphasis, to oneself or close friends (manga!)"),        '行くぞ！', '(iku zo!)')
+    particle('ぜ', '(ze)',   L("Rough masculine emphasis, invites/announces to listener (manga!)"),      'やろうぜ', '(yarō ze)')
+    particle('さ', '(sa)',   L("Light casual assertion; also filler mid-sentence"),                      'それはさ、違うんだよ', '(sore wa sa, chigau n da yo)')
+    particle('かな', '(kana)', L("'I wonder…' — doubt to oneself (かしら: feminine)"),                    '来るかな', '(kuru kana)')
+    particle('の', '(no)',   L("Final: soft question (rising) or explanation (falling); casual のだ"),   'どうしたの？・眠いの', '(dō shita no? / nemui no)')
     h = h .. '<hr/>'
 
     h = h .. '<h3>' .. L("Key sentence patterns") .. '</h3>'
@@ -557,7 +572,8 @@ local function _ref_particles()
     pattern('〜ながら',          L("while doing (simultaneous actions)"),            '音楽を聴きながら勉強する', '(ongaku wo kikinagara benkyō suru)')
     pattern('〜ばかり',          L("just did / doing nothing but"),                  '来たばかり・食べてばかりいる', '(kita bakari / tabete bakari iru)')
     pattern('〜はずだ',          L("should be / expected to be"),                    '彼は来るはずだ', '(kare wa kuru hazu da)')
-    pattern('〜そうだ',          L("looks like it will / I heard that"),             '雨が降りそうだ', '(ame ga furisō da)')
+    pattern('〜そうだ ①様態',    L("looks like / about to — ます-stem + そうだ"),     '雨が降りそうだ', '(ame ga furisō da — "looks like rain")')
+    pattern('〜そうだ ②伝聞',    L("I heard that / they say — plain form + そうだ"),  '雨が降るそうだ', '(ame ga furu sō da — "they say it will rain")')
     pattern('〜らしい',          L("seems like / apparently (evidence-based)"),      '彼は忙しいらしい', '(kare wa isogashii rashii)')
     pattern('〜わけだ',          L("that explains it / that means (logical conclusion)"), 'だからそうなるわけだ', '(dakara sō naru wake da)')
 
